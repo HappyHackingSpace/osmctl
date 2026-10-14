@@ -2,6 +2,7 @@ package osm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -220,5 +221,27 @@ func TestDataFindRemove(t *testing.T) {
 	d.Remove(ID{TypeWay, -3})
 	if d.Find(ID{TypeWay, -3}) != nil || d.Len() != 1 {
 		t.Error("Remove failed")
+	}
+}
+
+func TestEachXML(t *testing.T) {
+	var ids []string
+	err := EachXML(context.Background(), strings.NewReader(apiXML), false, func(el Element) error {
+		ids = append(ids, el.ElementID().String())
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, " ") != "node/1 node/2 node/3 way/10 relation/20" {
+		t.Errorf("ids = %v", ids)
+	}
+	ids = nil
+	_ = EachXML(context.Background(), strings.NewReader(apiXML), true, func(el Element) error {
+		ids = append(ids, el.ElementID().String())
+		return nil
+	})
+	if len(ids) != 3 {
+		t.Errorf("nodesOnly read %v", ids)
 	}
 }
