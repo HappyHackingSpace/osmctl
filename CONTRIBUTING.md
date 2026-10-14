@@ -35,7 +35,6 @@ tools/gendocs      generates docs/commands from the command tree
 ## Guidelines
 
 - **Keep dependencies minimal.** osmctl depends only on the Go standard library, `golang.org/x`, cobra and go-keyring. OSM formats are implemented in `internal/osm`; extend them there rather than adding a library.
-
 - **Test against fakes, not the live services.** Use `httptest` servers; see `internal/cli/cli_test.go` for the edit flow end to end. Never write tests that edit the real map.
 - **Manual testing of edits goes to the sandbox:** `--server dev`.
 - **Keep commands consistent.** Elements are parsed by `osm.ParseID`, points are `lat,lon`, bounding boxes are `minlon,minlat,maxlon,maxlat`, and every command honors `-o`.
