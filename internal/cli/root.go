@@ -120,6 +120,7 @@ Practice on the sandbox first: ` + "`osmctl --server dev ...`",
 		}
 	}
 	add("read", newGetCmd(a), newHistoryCmd(a), newMapCmd(a), newChangesetCmd(a), newUserCmd(a), newBrowseCmd(a))
+	add("search", newQueryCmd(a), newFindCmd(a), newGeocodeCmd(a), newReverseCmd(a))
 	add("account", newAuthCmd(a))
 	return root
 }
