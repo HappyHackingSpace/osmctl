@@ -169,6 +169,12 @@ osmctl push -m "Add opening hours and wheelchair access from survey" --source su
 
 In scripts, `--yes` skips the confirmation. Without a terminal, osmctl refuses to push unless `--yes` is given.
 
+### Large uploads
+
+A changeset holds at most 10,000 changes on openstreetmap.org (osmctl asks the server for its limit). Larger stages are split automatically into several changesets, uploaded in an order the server can apply: new nodes, then ways, then relations, then modifications, then deletions. Each comment gets "(part 2 of 3)" appended. If a part fails, the parts before it are already on the map and only the rest stays staged; run `push` again to continue.
+
+Uploads this large are usually imports or automated edits, which need community agreement first.
+
 ### Conflicts
 
 If someone else changed an element after you staged it, the server rejects the whole upload with a version conflict. Nothing is written and your stage is kept. Look at the newer version, reset your copy and redo the edit:

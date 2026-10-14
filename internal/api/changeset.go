@@ -145,3 +145,23 @@ func (c *Client) Upload(ctx context.Context, id int64, change *osm.Change) (*Dif
 	}
 	return &res, nil
 }
+
+// DefaultChangesetLimit is openstreetmap.org's limit, used when the server
+// does not say.
+const DefaultChangesetLimit = 10000
+
+// ChangesetLimit asks the server how many changes one changeset may hold.
+func (c *Client) ChangesetLimit(ctx context.Context) int {
+	var caps struct {
+		Changesets struct {
+			Max int `xml:"maximum_elements,attr"`
+		} `xml:"api>changesets"`
+	}
+	err := c.do(ctx, http.MethodGet, "/capabilities", nil, "", func(r io.Reader) error {
+		return xml.NewDecoder(r).Decode(&caps)
+	})
+	if err != nil || caps.Changesets.Max <= 0 {
+		return DefaultChangesetLimit
+	}
+	return caps.Changesets.Max
+}
