@@ -3,6 +3,7 @@ package geo
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -56,4 +57,16 @@ func floats(s string, n int) ([]float64, error) {
 		out[i] = f
 	}
 	return out, nil
+}
+
+// Around returns the box enclosing a circle of radius meters, for APIs that
+// only take a bbox.
+func Around(p Point, meters float64) *osm.Bounds {
+	const metersPerDegree = 111320.0
+	dLat := meters / metersPerDegree
+	dLon := meters / (metersPerDegree * math.Max(math.Cos(p.Lat*math.Pi/180), 0.01))
+	return &osm.Bounds{
+		MinLat: math.Max(p.Lat-dLat, -90), MaxLat: math.Min(p.Lat+dLat, 90),
+		MinLon: math.Max(p.Lon-dLon, -180), MaxLon: math.Min(p.Lon+dLon, 180),
+	}
 }

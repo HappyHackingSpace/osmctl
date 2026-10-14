@@ -25,3 +25,14 @@ func TestParseBBox(t *testing.T) {
 		}
 	}
 }
+
+func TestAround(t *testing.T) {
+	b := Around(Point{Lat: 0, Lon: 0}, 111320)
+	if b.MinLat > -0.999 || b.MaxLat < 0.999 || b.MaxLon < 0.999 {
+		t.Errorf("Around at equator = %+v, want about ±1°", b)
+	}
+	b = Around(Point{Lat: 60, Lon: 10}, 1000)
+	if w, h := b.MaxLon-b.MinLon, b.MaxLat-b.MinLat; w < 1.9*h {
+		t.Errorf("at 60°N longitude span should be about twice latitude span: %v vs %v", w, h)
+	}
+}
