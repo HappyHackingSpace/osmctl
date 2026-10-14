@@ -26,18 +26,23 @@ On machines without a keychain (CI, containers) set OSMCTL_TOKEN instead.`,
 }
 
 func newAuthLoginCmd(a *app) *cobra.Command {
-	var manual, withToken bool
+	var noBrowser, withToken bool
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authorize osmctl with your OpenStreetMap account",
 		Long: `Authorize osmctl with your OpenStreetMap account.
 
-By default this opens your browser and receives the result on
-http://127.0.0.1:41117. Use --manual on remote machines to paste the code
-instead, or --with-token to read an existing token from standard input.`,
+This opens your browser; approve osmctl and the login completes by itself.
+
+On a remote machine (over SSH, in a container) open the printed link in any
+browser instead. After you approve, that browser shows an error page,
+because osmctl is not running there; paste the address it was sent to into
+the terminal and the login completes.
+
+--with-token reads an existing token from standard input instead.`,
 		Example: `  osmctl auth login
   osmctl --server dev auth login
-  osmctl auth login --manual
+  osmctl auth login --no-browser
   osmctl auth login --with-token < token.txt`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -53,7 +58,7 @@ instead, or --with-token to read an existing token from standard input.`,
 				}
 			} else {
 				token, err = auth.Login(cmd.Context(), a.srv, auth.LoginOptions{
-					Manual: manual, Open: browser.Open, In: a.in, Out: a.errOut, HTTP: a.http(),
+					NoBrowser: noBrowser, Open: browser.Open, In: a.in, Out: a.errOut, HTTP: a.http(),
 				})
 				if err != nil {
 					return err
@@ -71,9 +76,9 @@ instead, or --with-token to read an existing token from standard input.`,
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&manual, "manual", false, "paste the authorization code instead of using a local redirect")
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "print the authorization link instead of opening a browser")
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "read an access token from standard input")
-	cmd.MarkFlagsMutuallyExclusive("manual", "with-token")
+	cmd.MarkFlagsMutuallyExclusive("no-browser", "with-token")
 	return cmd
 }
 

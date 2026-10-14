@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,29 +23,38 @@ import (
 
 const (
 	// The port is fixed because OSM matches redirect URIs exactly as registered.
+	// It is the only redirect osmctl uses: OSM accepts https and 127.0.0.1
+	// redirects, not the out-of-band urn.
 	LoopbackAddr     = "127.0.0.1:41117"
 	LoopbackRedirect = "http://" + LoopbackAddr + "/callback"
-	// OOBRedirect makes OSM show the code on a page for the user to paste,
-	// for machines where osmctl cannot receive the browser redirect.
-	OOBRedirect = "urn:ietf:wg:oauth:2.0:oob"
 )
 
 type LoginOptions struct {
-	// Manual uses copy and paste instead of a local redirect listener.
-	Manual bool
-	Open   func(url string) error
-	In     io.Reader
-	Out    io.Writer
-	HTTP   *http.Client
+	// NoBrowser only prints the authorization link, for when no browser can be
+	// launched from this machine.
+	NoBrowser bool
+	Open      func(url string) error
+	// In receives a pasted redirect address, for a browser on another machine.
+	In   io.Reader
+	Out  io.Writer
+	HTTP *http.Client
 }
 
-// Login runs the authorization code flow with PKCE and returns the access token.
+type result struct {
+	code string
+	err  error
+}
+
+// errForged aborts the login: a redirect carrying someone else's state is
+// either a mistake or an attempt to log the user in to another account.
+var errForged = errors.New("login redirect had a mismatched state; aborting")
+
+// Login runs the authorization code flow with PKCE and returns the access
+// token. It listens for the browser redirect and, at the same time, accepts
+// the redirect address pasted into the terminal, so the same command works
+// whether the browser runs on this machine or another one.
 func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, error) {
-	redirect := LoopbackRedirect
-	if opts.Manual {
-		redirect = OOBRedirect
-	}
-	cfg, err := config(srv, redirect)
+	cfg, err := config(srv, LoopbackRedirect)
 	if err != nil {
 		return "", err
 	}
@@ -59,14 +69,42 @@ func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, e
 	}
 	authURL := cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
 
-	var code string
-	if opts.Manual {
-		code, err = manualCode(opts, authURL)
-	} else {
-		code, err = loopbackCode(ctx, opts, authURL, state)
+	results := make(chan result, 2)
+	stop, listenErr := listen(ctx, state, results)
+	if listenErr == nil {
+		defer stop()
 	}
-	if err != nil {
-		return "", err
+	if opts.In != nil {
+		go readPaste(opts.In, opts.Out, state, results, listenErr)
+	}
+
+	if listenErr != nil && opts.In == nil {
+		return "", fmt.Errorf("listen on %s for the login redirect: %w", LoopbackAddr, listenErr)
+	}
+	if opts.NoBrowser || opts.Open == nil || opts.Open(authURL) != nil {
+		fmt.Fprintf(opts.Out, "Open this link in a browser and approve osmctl:\n\n  %s\n\n", authURL)
+	} else {
+		fmt.Fprintf(opts.Out, "Approve osmctl in the browser window that opened. If none did, open:\n\n  %s\n\n", authURL)
+	}
+	if listenErr == nil {
+		fmt.Fprintf(opts.Out, "Waiting for approval... If your browser is on another machine, it will show an\n"+
+			"error page after you approve; paste the address it was sent to here.\n")
+	} else {
+		fmt.Fprintf(opts.Out, "After approving, the browser is sent to %s?code=...\n"+
+			"Paste that address here.\n", LoopbackRedirect)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	var code string
+	select {
+	case res := <-results:
+		if res.err != nil {
+			return "", res.err
+		}
+		code = res.code
+	case <-ctx.Done():
+		return "", fmt.Errorf("waiting for login approval: %w", ctx.Err())
 	}
 
 	tok, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
@@ -76,30 +114,12 @@ func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, e
 	return tok.AccessToken, nil
 }
 
-func manualCode(opts LoginOptions, authURL string) (string, error) {
-	fmt.Fprintf(opts.Out, "Open this URL, approve osmctl, then paste the code shown:\n\n  %s\n\nCode: ", authURL)
-	line, err := bufio.NewReader(opts.In).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", err
-	}
-	code := strings.TrimSpace(line)
-	if code == "" {
-		return "", errors.New("no code entered")
-	}
-	return code, nil
-}
-
-func loopbackCode(ctx context.Context, opts LoginOptions, authURL, state string) (string, error) {
+// listen serves the redirect target on the loopback address.
+func listen(ctx context.Context, state string, results chan<- result) (func(), error) {
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", LoopbackAddr)
 	if err != nil {
-		return "", fmt.Errorf("listen on %s for the login redirect (try --manual): %w", LoopbackAddr, err)
+		return nil, err
 	}
-
-	type result struct {
-		code string
-		err  error
-	}
-	done := make(chan result, 1)
 	srv := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,39 +127,60 @@ func loopbackCode(ctx context.Context, opts LoginOptions, authURL, state string)
 				http.NotFound(w, r)
 				return
 			}
-			q := r.URL.Query()
-			res := result{code: q.Get("code")}
-			switch {
-			case q.Get("error") != "":
-				res.err = fmt.Errorf("authorization denied: %s %s", q.Get("error"), q.Get("error_description"))
-			case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1:
-				res.err = errors.New("login redirect had a mismatched state; aborting")
-			case res.code == "":
-				res.err = errors.New("login redirect carried no code")
-			}
-			page(w, res.err)
+			code, err := callbackCode(r.URL.Query(), state)
+			page(w, err)
 			select {
-			case done <- res:
+			case results <- result{code, err}:
 			default:
 			}
 		}),
 	}
 	go func() { _ = srv.Serve(ln) }()
-	defer func() { _ = srv.Close() }()
+	return func() { _ = srv.Close() }, nil
+}
 
-	fmt.Fprintf(opts.Out, "Opening your browser to authorize osmctl. If it does not open, visit:\n\n  %s\n\n", authURL)
-	if opts.Open != nil {
-		_ = opts.Open(authURL)
+// readPaste accepts redirect addresses typed into the terminal. Anything that
+// is not one gets a hint and another try. At end of input it stops quietly
+// while the browser redirect can still arrive, and fails the login when the
+// listener could not start, since then nothing else can complete it.
+func readPaste(in io.Reader, out io.Writer, state string, results chan<- result, listenErr error) {
+	sc := bufio.NewScanner(in)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		u, err := url.Parse(line)
+		if err != nil || !strings.HasPrefix(line, LoopbackRedirect) || u.RawQuery == "" {
+			fmt.Fprintf(out, "That is not the redirect address. Paste the whole address, starting with %s?code=\n", LoopbackRedirect)
+			continue
+		}
+		code, err := callbackCode(u.Query(), state)
+		select {
+		case results <- result{code, err}:
+		default:
+		}
+		return
 	}
+	if listenErr != nil {
+		select {
+		case results <- result{err: fmt.Errorf("listen on %s for the login redirect: %w; and no redirect address was pasted", LoopbackAddr, listenErr)}:
+		default:
+		}
+	}
+}
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	select {
-	case res := <-done:
-		return res.code, res.err
-	case <-ctx.Done():
-		return "", fmt.Errorf("waiting for browser login: %w", ctx.Err())
+// callbackCode validates the redirect parameters and returns the code.
+func callbackCode(q url.Values, state string) (string, error) {
+	switch {
+	case q.Get("error") != "":
+		return "", fmt.Errorf("authorization denied: %s %s", q.Get("error"), q.Get("error_description"))
+	case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1:
+		return "", errForged
+	case q.Get("code") == "":
+		return "", errors.New("login redirect carried no code")
 	}
+	return q.Get("code"), nil
 }
 
 func page(w http.ResponseWriter, err error) {
