@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -147,9 +148,12 @@ func (c *Client) Upload(ctx context.Context, id osm.ChangesetID, change *osm.Cha
 	if change == nil || (change.Create == nil && change.Modify == nil && change.Delete == nil) {
 		return nil, errors.New("nothing to upload")
 	}
-	stamped := stampChangeset(change, id)
+	body, err := EncodeChange(stampChangeset(change, id))
+	if err != nil {
+		return nil, err
+	}
 	var res DiffResult
-	if err := c.sendXML(ctx, http.MethodPost, fmt.Sprintf("/changeset/%d/upload", id), stamped, &res); err != nil {
+	if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/changeset/%d/upload", id), bytes.NewReader(body), "text/xml; charset=utf-8", &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -184,6 +188,112 @@ func stampChangeset(src *osm.Change, id osm.ChangesetID) *osm.Change {
 	dst.Create, dst.Modify, dst.Delete = stamp(src.Create), stamp(src.Modify), stamp(src.Delete)
 	return dst
 }
+
+// EncodeChange writes a minimal osmChange: only the attributes the API reads,
+// so placeholder metadata such as uid="0" or a zero timestamp never reaches
+// the server. Deletes go relations, ways, then nodes; otherwise deleting a way
+// together with its nodes fails because the nodes are still in use when their
+// turn comes.
+func EncodeChange(c *osm.Change) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := xml.NewEncoder(&buf)
+	w := &xmlWriter{enc: enc}
+	root := w.open("osmChange", "version", "0.6")
+	if c.Generator != "" {
+		root.Attr = append(root.Attr, xml.Attr{Name: xml.Name{Local: "generator"}, Value: c.Generator})
+	}
+	w.token(root)
+	for _, sec := range []struct {
+		name string
+		o    *osm.OSM
+	}{{"create", c.Create}, {"modify", c.Modify}, {"delete", c.Delete}} {
+		if sec.o == nil {
+			continue
+		}
+		w.token(w.open(sec.name))
+		create := sec.name == "create"
+		writeNodes := func() {
+			for _, n := range sec.o.Nodes {
+				w.element("node", int64(n.ID), n.Version, n.ChangesetID, create, n.Tags, func() {}, "lat", fmtFloat(n.Lat), "lon", fmtFloat(n.Lon))
+			}
+		}
+		writeWays := func() {
+			for _, way := range sec.o.Ways {
+				w.element("way", int64(way.ID), way.Version, way.ChangesetID, create, way.Tags, func() {
+					for _, wn := range way.Nodes {
+						w.empty("nd", "ref", strconv.FormatInt(int64(wn.ID), 10))
+					}
+				})
+			}
+		}
+		writeRelations := func() {
+			for _, r := range sec.o.Relations {
+				w.element("relation", int64(r.ID), r.Version, r.ChangesetID, create, r.Tags, func() {
+					for _, m := range r.Members {
+						w.empty("member", "type", string(m.Type), "ref", strconv.FormatInt(m.Ref, 10), "role", m.Role)
+					}
+				})
+			}
+		}
+		if sec.name == "delete" {
+			writeRelations()
+			writeWays()
+			writeNodes()
+		} else {
+			writeNodes()
+			writeWays()
+			writeRelations()
+		}
+		w.token(xml.EndElement{Name: xml.Name{Local: sec.name}})
+	}
+	w.token(root.End())
+	if w.err == nil {
+		w.err = enc.Flush()
+	}
+	return buf.Bytes(), w.err
+}
+
+// xmlWriter keeps the first encoding error so the encoder reads linearly.
+type xmlWriter struct {
+	enc *xml.Encoder
+	err error
+}
+
+func (w *xmlWriter) open(name string, attrs ...string) xml.StartElement {
+	el := xml.StartElement{Name: xml.Name{Local: name}}
+	for i := 0; i+1 < len(attrs); i += 2 {
+		el.Attr = append(el.Attr, xml.Attr{Name: xml.Name{Local: attrs[i]}, Value: attrs[i+1]})
+	}
+	return el
+}
+
+func (w *xmlWriter) token(t xml.Token) {
+	if w.err == nil {
+		w.err = w.enc.EncodeToken(t)
+	}
+}
+
+func (w *xmlWriter) empty(name string, attrs ...string) {
+	el := w.open(name, attrs...)
+	w.token(el)
+	w.token(el.End())
+}
+
+func (w *xmlWriter) element(name string, id int64, version int, cs osm.ChangesetID, create bool, tags osm.Tags, children func(), attrs ...string) {
+	all := []string{"id", strconv.FormatInt(id, 10), "changeset", strconv.FormatInt(int64(cs), 10)}
+	if !create {
+		all = append(all, "version", strconv.Itoa(version))
+	}
+	el := w.open(name, append(all, attrs...)...)
+	w.token(el)
+	children()
+	for _, t := range tags {
+		w.empty("tag", "k", t.Key, "v", t.Value)
+	}
+	w.token(el.End())
+}
+
+func fmtFloat(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 func bboxParam(b *osm.Bounds) string {
 	return fmt.Sprintf("%g,%g,%g,%g", b.MinLon, b.MinLat, b.MaxLon, b.MaxLat)

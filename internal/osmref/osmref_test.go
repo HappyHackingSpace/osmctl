@@ -1,6 +1,10 @@
 package osmref
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/paulmach/osm"
+)
 
 func TestParse(t *testing.T) {
 	valid := map[string]string{
@@ -24,9 +28,26 @@ func TestParse(t *testing.T) {
 		}
 	}
 
-	for _, in := range []string{"", "123", "x123", "node/", "node/abc", "https://example.org/", "changeset/1", "n999999999999", "n99999999999999999999"} {
+	for _, in := range []string{"", "123", "x123", "node/", "node/abc", "n0", "https://example.org/", "changeset/1", "n999999999999", "n99999999999999999999"} {
 		if _, err := Parse(in); err == nil {
 			t.Errorf("Parse(%q): expected error", in)
 		}
+	}
+}
+
+func TestIDNegative(t *testing.T) {
+	for _, ty := range []osm.Type{osm.TypeNode, osm.TypeWay, osm.TypeRelation} {
+		for _, ref := range []int64{-3, -1, 1, 42, maxRef} {
+			id, err := ID(ty, ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id.Type() != ty || id.Ref() != ref {
+				t.Errorf("ID(%s, %d) = %s (type %s, ref %d)", ty, ref, id, id.Type(), id.Ref())
+			}
+		}
+	}
+	if got := Of(&osm.Way{ID: -7}); got.Type() != osm.TypeWay || got.Ref() != -7 {
+		t.Errorf("Of(way -7) = %s", got)
 	}
 }

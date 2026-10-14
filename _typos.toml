@@ -1,0 +1,3 @@
+[default.extend-words]
+# <nd ref="..."/> is the OSM XML element for a way's node reference.
+nd = "nd"

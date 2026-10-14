@@ -6,6 +6,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/paulmach/osm"
+
+	"github.com/happyhackingspace/osmctl/internal/osmref"
 )
 
 // Change renders an osmChange. JSON keeps the create/modify/delete split;
@@ -28,9 +30,13 @@ func Change(w io.Writer, c *osm.Change, f Format) error {
 	})
 }
 
-func featureIDs(o *osm.OSM) osm.FeatureIDs {
+func featureIDs(o *osm.OSM) []osm.FeatureID {
 	if o == nil {
 		return nil
 	}
-	return o.FeatureIDs()
+	var ids []osm.FeatureID
+	for _, el := range o.Elements() {
+		ids = append(ids, osmref.Of(el))
+	}
+	return ids
 }

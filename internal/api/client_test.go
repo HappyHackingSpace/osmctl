@@ -139,3 +139,46 @@ func TestChangesetReadsChangesCount(t *testing.T) {
 		t.Errorf("unexpected changeset %+v", cs)
 	}
 }
+
+func TestUploadDeletesParentsBeforeNodes(t *testing.T) {
+	var body string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = io.WriteString(w, `<diffResult/>`)
+	})
+	change := &osm.Change{
+		Create: &osm.OSM{Nodes: osm.Nodes{{ID: -1}}, Ways: osm.Ways{{ID: -2, Nodes: osm.WayNodes{{ID: -1}, {ID: 3}}}}},
+		Delete: &osm.OSM{Nodes: osm.Nodes{{ID: 1, Version: 1}}, Ways: osm.Ways{{ID: 9, Version: 1}}},
+	}
+	if _, err := c.Upload(context.Background(), 5, change); err != nil {
+		t.Fatal(err)
+	}
+	create := body[strings.Index(body, "<create>"):strings.Index(body, "</create>")]
+	if strings.Index(create, "<node") > strings.Index(create, "<way") {
+		t.Errorf("create must list nodes before the ways using them:\n%s", create)
+	}
+	del := body[strings.Index(body, "<delete>"):]
+	if strings.Index(del, "<way") > strings.Index(del, "<node") {
+		t.Errorf("delete must list ways before their nodes:\n%s", del)
+	}
+	if !strings.Contains(body, `<way id="-2"`) || !strings.Contains(body, `<nd ref="-1"`) {
+		t.Errorf("placeholder ids lost:\n%s", body)
+	}
+}
+
+func TestEncodeChangeIsMinimal(t *testing.T) {
+	b, err := EncodeChange(&osm.Change{
+		Create: &osm.OSM{Nodes: osm.Nodes{{ID: -1, Lat: 37.91, Lon: 40.23, Visible: true, ChangesetID: 5, Tags: osm.Tags{{Key: "name", Value: `A & "B"`}}}}},
+		Modify: &osm.OSM{Relations: osm.Relations{{ID: 3, Version: 4, ChangesetID: 5, User: "x", UserID: 9,
+			Members: osm.Members{{Type: osm.TypeWay, Ref: 8, Role: "outer"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<osmChange version="0.6"><create><node id="-1" changeset="5" lat="37.91" lon="40.23"><tag k="name" v="A &amp; &#34;B&#34;"></tag></node></create>` +
+		`<modify><relation id="3" changeset="5" version="4"><member type="way" ref="8" role="outer"></member></relation></modify></osmChange>`
+	if string(b) != want {
+		t.Errorf("got\n%s\nwant\n%s", b, want)
+	}
+}
