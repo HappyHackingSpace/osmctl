@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/happyhackingspace/osmctl/tree/main/docs
+    about: Guides for reading, searching, editing and local data
+  - name: OpenStreetMap community forum
+    url: https://community.openstreetmap.org
+    about: Questions about mapping and tagging, rather than about osmctl
