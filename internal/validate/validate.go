@@ -44,6 +44,7 @@ func Check(ctx context.Context, s *stage.Stage, src MapSource) []Issue {
 	issues = append(issues, references(s)...)
 	issues = append(issues, orphans(s)...)
 	issues = append(issues, wayShape(s)...)
+	issues = append(issues, relationShape(s)...)
 	issues = append(issues, deprecated(s)...)
 	if src != nil {
 		issues = append(issues, network(ctx, s, src)...)
@@ -171,4 +172,22 @@ func inRelation(s *stage.Stage, id osm.ID) bool {
 	// A modified way may already belong to a relation on the server; only
 	// new ways are known for sure to have none.
 	return id.Ref > 0
+}
+
+func relationShape(s *stage.Stage) []Issue {
+	var out []Issue
+	for _, el := range staged(s) {
+		r, ok := el.(*osm.Relation)
+		if !ok {
+			continue
+		}
+		id := r.ElementID().String()
+		if len(r.Members) == 0 {
+			out = append(out, Issue{Error, id, "empty-relation", "relation has no members; delete it instead"})
+		}
+		if !r.Tags.Has("type") {
+			out = append(out, Issue{Warning, id, "relation-type", "relation has no type tag, so nothing knows how to read it (e.g. type=multipolygon, type=route)"})
+		}
+	}
+	return out
 }

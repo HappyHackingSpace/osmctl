@@ -154,3 +154,12 @@ func TestComment(t *testing.T) {
 		t.Error("warning should quote the comment")
 	}
 }
+
+func TestRelationChecks(t *testing.T) {
+	s := stage.New("https://example.org")
+	s.Modify = &osm.Data{Relations: []*osm.Relation{{ID: 5, Meta: osm.Meta{Version: 2}}}}
+	got := codes(Check(context.Background(), s, nil))
+	if got["empty-relation"] != 1 || got["relation-type"] != 1 {
+		t.Errorf("issues = %v", got)
+	}
+}

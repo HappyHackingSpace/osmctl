@@ -31,5 +31,5 @@ osmctl add way --nodes <n1,n2,...> [key=value]... [flags]
 
 ### SEE ALSO
 
-* [osmctl add](osmctl_add.md)	 - Create new nodes and ways
+* [osmctl add](osmctl_add.md)	 - Create new nodes, ways and relations
 

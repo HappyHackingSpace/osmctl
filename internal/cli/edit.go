@@ -68,7 +68,7 @@ Quote values with spaces. Nothing is uploaded until ` + "`osmctl push`" + `.`,
 func newAddCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: "Create new nodes and ways",
+		Short: "Create new nodes, ways and relations",
 		Long: `Stage new elements. They get negative placeholder ids (n-1, w-2, ...)
 that you can use in later commands; the server assigns real ids on push.`,
 	}
@@ -162,7 +162,103 @@ used instead of adding a new one next to it.`,
 	way.Flags().BoolVar(&closed, "close", false, "close the way into a ring (for areas)")
 	_ = way.MarkFlagRequired("nodes")
 
-	cmd.AddCommand(node, way)
+	var members []string
+	relation := &cobra.Command{
+		Use:   "relation --member <element[:role]>... [key=value]...",
+		Short: "Add a relation, such as a route or a multipolygon",
+		Example: `  osmctl add relation type=route route=hiking name="Pîr Ezîz trail" --member w1568227783 --member w-3
+  osmctl add relation type=multipolygon natural=water --member w-1:outer --member w-2:inner`,
+		RunE: func(_ *cobra.Command, args []string) error {
+			ms, err := parseMembers(members)
+			if err != nil {
+				return err
+			}
+			tags, err := stage.ParseTags(args)
+			if err != nil {
+				return err
+			}
+			return a.edit(func(s *stage.Stage) (string, error) {
+				id, err := s.AddRelation(ms, tags)
+				return "Added " + id.String(), err
+			})
+		},
+	}
+	relation.Flags().StringSliceVar(&members, "member", nil, "member as element or element:role, in order (repeatable)")
+	_ = relation.MarkFlagRequired("member")
+
+	cmd.AddCommand(node, way, relation)
+	return cmd
+}
+
+func parseMembers(args []string) ([]osm.Member, error) {
+	out := make([]osm.Member, 0, len(args))
+	for _, a := range args {
+		m, err := stage.ParseMember(a)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func newMemberCmd(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "member",
+		Short: "Add or remove members of a relation",
+		Long:  "Change which elements belong to a relation. Members are written as element or\nelement:role, for example way/12:outer or n-1.",
+	}
+	var at int
+	add := &cobra.Command{
+		Use:   "add <relation> <element[:role]>...",
+		Short: "Add members to a relation",
+		Example: `  osmctl member add r1234 way/5678:outer
+  osmctl member add r1234 n-1:stop --at 0`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := osm.ParseID(args[0])
+			if err != nil {
+				return err
+			}
+			ms, err := parseMembers(args[1:])
+			if err != nil {
+				return err
+			}
+			pos := -1
+			if cmd.Flags().Changed("at") {
+				pos = at
+			}
+			return a.edit(func(s *stage.Stage) (string, error) {
+				return fmt.Sprintf("Added %d member(s) to %s", len(ms), id), s.AddMembers(cmd.Context(), a.client(), id, ms, pos)
+			})
+		},
+	}
+	add.Flags().IntVar(&at, "at", 0, "insert at this position (0 is first; default is the end)")
+
+	remove := &cobra.Command{
+		Use:     "remove <relation> <element>...",
+		Short:   "Remove members from a relation",
+		Example: "  osmctl member remove r1234 way/5678",
+		Args:    cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := osm.ParseID(args[0])
+			if err != nil {
+				return err
+			}
+			elements := make([]osm.ID, 0, len(args)-1)
+			for _, arg := range args[1:] {
+				e, err := osm.ParseID(arg)
+				if err != nil {
+					return err
+				}
+				elements = append(elements, e)
+			}
+			return a.edit(func(s *stage.Stage) (string, error) {
+				return fmt.Sprintf("Removed %d member(s) from %s", len(elements), id), s.RemoveMembers(cmd.Context(), a.client(), id, elements)
+			})
+		},
+	}
+	cmd.AddCommand(add, remove)
 	return cmd
 }
 

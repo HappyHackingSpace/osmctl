@@ -1,6 +1,6 @@
 ## osmctl add
 
-Create new nodes and ways
+Create new nodes, ways and relations
 
 ### Synopsis
 
@@ -24,5 +24,6 @@ that you can use in later commands; the server assigns real ids on push.
 
 * [osmctl](osmctl.md)	 - Read, query, edit and contribute to OpenStreetMap from the terminal
 * [osmctl add node](osmctl_add_node.md)	 - Add a point, or a node on existing ways to connect to them
+* [osmctl add relation](osmctl_add_relation.md)	 - Add a relation, such as a route or a multipolygon
 * [osmctl add way](osmctl_add_way.md)	 - Add a line or area through existing or staged nodes
 

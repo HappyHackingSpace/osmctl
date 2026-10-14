@@ -40,5 +40,5 @@ osmctl add node --at <lat,lon> [--on <way>]... [key=value]... [flags]
 
 ### SEE ALSO
 
-* [osmctl add](osmctl_add.md)	 - Create new nodes and ways
+* [osmctl add](osmctl_add.md)	 - Create new nodes, ways and relations
 
