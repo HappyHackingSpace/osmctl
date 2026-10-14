@@ -224,13 +224,13 @@ so the server can detect conflicts.`,
 				defer func() { _ = f.Close() }()
 				r = f
 			}
-			var c osm.Change
-			if err := xml.NewDecoder(r).Decode(&c); err != nil {
-				return fmt.Errorf("read osmChange: %w", err)
+			c, err := osm.ReadChange(r)
+			if err != nil {
+				return err
 			}
 			return a.edit(func(s *stage.Stage) (string, error) {
 				before := s.Len()
-				if err := s.Apply(&c); err != nil {
+				if err := s.Apply(c); err != nil {
 					return "", err
 				}
 				return fmt.Sprintf("Applied %d change(s)", s.Len()-before), nil

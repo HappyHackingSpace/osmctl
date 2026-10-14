@@ -168,3 +168,22 @@ func TestPushRequiresComment(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestApplyStagesOsmChange(t *testing.T) {
+	t.Setenv(stage.DirEnv, t.TempDir())
+	f := newFakeOSM(t)
+	osc := `<osmChange version="0.6">
+		<create><node id="-1" lat="1" lon="2"><tag k="amenity" v="bench"/></node></create>
+		<modify><node id="1" version="3" lat="37.91" lon="40.23"><tag k="name" v="Fixed"/></node></modify>
+	</osmChange>`
+	if _, _, err := run(t, memStore{}, osc, "--server", f.URL, "apply", "-"); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := run(t, memStore{}, "", "--server", f.URL, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "1 to create, 1 to modify") {
+		t.Errorf("apply did not stage the file:\n%s", out)
+	}
+}
