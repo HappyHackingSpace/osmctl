@@ -34,17 +34,17 @@ osmctl requests these permissions: `read_prefs` (your profile), `write_api` (edi
 
 ## Remote machines
 
-When osmctl runs somewhere your browser can't reach (over SSH, in a container), use the copy and paste flow:
+The same command works when osmctl runs somewhere your browser can't reach (over SSH, in a container). Add `--no-browser` so it only prints the link:
 
 ```sh
-osmctl auth login --manual
+osmctl auth login --no-browser
 ```
 
-1. Open the printed URL in a browser on any device and approve osmctl.
-2. The browser is sent to `http://127.0.0.1:41117/callback?code=...` and shows an error such as "127.0.0.1 refused to connect". That is expected: osmctl is not listening in manual mode, but the address holds the code.
-3. Copy the whole address from the address bar and paste it into the terminal.
+1. Open the printed link in a browser on any device and approve osmctl.
+2. That browser is sent to `http://127.0.0.1:41117/callback?code=...` and shows an error page, because osmctl is not running on that device.
+3. Copy the address from the address bar and paste it into the terminal. The login completes.
 
-osmctl checks that the pasted address belongs to the login it started before using the code.
+osmctl checks that a pasted address belongs to the login it started before it uses the code.
 
 ## CI and machines without a keychain
 
@@ -69,7 +69,7 @@ OAuth applications are registered separately on every OpenStreetMap instance. os
 
 1. Log in to the instance's website and open `/oauth2/applications/new`.
 2. Name it `osmctl` and leave **Confidential application** unchecked: osmctl is a public client and uses PKCE.
-3. Set the redirect URI to `http://127.0.0.1:41117/callback`. It serves both the browser login and `--manual`.
+3. Set the redirect URI to `http://127.0.0.1:41117/callback`. It serves both the automatic login and the pasted address on remote machines.
 4. Grant the permissions osmctl requests: `read_prefs`, `write_api`, `write_notes` and `write_changeset_comments`.
 5. Save, then pass the **Client ID** to osmctl:
 

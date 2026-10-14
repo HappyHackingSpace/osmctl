@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/happyhackingspace/osmctl/internal/server"
 )
@@ -101,15 +103,16 @@ func pasteRedirect(t *testing.T, out *io.PipeReader, in *io.PipeWriter, edit fun
 	_, _ = io.WriteString(in, edit(resp.Header.Get("Location"))+"\n")
 }
 
-func TestLoginManual(t *testing.T) {
+func TestLoginPaste(t *testing.T) {
 	osmSrv := fakeOSM(t)
 	srv := server.Server{Name: "test", Web: osmSrv.URL, ClientID: "test-client"}
 
 	outR, outW := io.Pipe()
 	inR, inW := io.Pipe()
-	go pasteRedirect(t, outR, inW, func(u string) string { return u })
+	// A wrong paste first: it should get a hint, not end the login.
+	go pasteRedirect(t, outR, inW, func(u string) string { return "not a url\n" + u })
 
-	tok, err := Login(context.Background(), srv, LoginOptions{Manual: true, In: inR, Out: outW})
+	tok, err := Login(context.Background(), srv, LoginOptions{NoBrowser: true, In: inR, Out: outW})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +121,7 @@ func TestLoginManual(t *testing.T) {
 	}
 }
 
-func TestLoginManualRejectsForgedState(t *testing.T) {
+func TestLoginRejectsForgedState(t *testing.T) {
 	osmSrv := fakeOSM(t)
 	srv := server.Server{Name: "test", Web: osmSrv.URL, ClientID: "test-client"}
 
@@ -132,18 +135,41 @@ func TestLoginManualRejectsForgedState(t *testing.T) {
 		return parsed.String()
 	})
 
-	_, err := Login(context.Background(), srv, LoginOptions{Manual: true, In: inR, Out: outW})
+	_, err := Login(context.Background(), srv, LoginOptions{NoBrowser: true, In: inR, Out: outW})
 	if err == nil || !strings.Contains(err.Error(), "mismatched state") {
 		t.Errorf("err = %v, want a state mismatch", err)
 	}
 }
 
-func TestLoginManualNeedsTheFullAddress(t *testing.T) {
+func TestLoginKeepsWaitingAfterBadPaste(t *testing.T) {
 	srv := server.Server{Name: "test", Web: "https://osm.invalid", ClientID: "test-client"}
-	_, err := Login(context.Background(), srv, LoginOptions{Manual: true, In: strings.NewReader("just-a-code\n"), Out: io.Discard})
-	if err == nil || !strings.Contains(err.Error(), "full address") {
-		t.Errorf("err = %v", err)
+	var out syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err := Login(ctx, srv, LoginOptions{NoBrowser: true, In: strings.NewReader("just-a-code\n"), Out: &out})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("a bad paste should not end the login, err = %v", err)
 	}
+	if !strings.Contains(out.String(), "not the redirect address") {
+		t.Errorf("no hint after a bad paste:\n%s", out.String())
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func TestLoginWithoutClientID(t *testing.T) {
