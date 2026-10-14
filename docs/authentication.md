@@ -16,6 +16,8 @@ osmctl --server dev auth login  # the sandbox needs its own account and login
 
 osmctl opens your browser on the OpenStreetMap authorization page. After you approve, the browser returns to osmctl on `http://127.0.0.1:41117`, and osmctl stores the token in your system keychain (macOS Keychain, Windows Credential Manager, or the Secret Service on Linux).
 
+osmctl ships with its own OAuth application for openstreetmap.org, so there is nothing to register. The development server and self-hosted instances need their own; see [below](#oauth-applications-and-self-hosted-instances).
+
 Check who you are logged in as:
 
 ```sh
@@ -38,7 +40,11 @@ When osmctl runs somewhere your browser can't reach (over SSH, in a container), 
 osmctl auth login --manual
 ```
 
-Open the printed URL on any device, approve, and paste the code shown back into the terminal.
+1. Open the printed URL in a browser on any device and approve osmctl.
+2. The browser is sent to `http://127.0.0.1:41117/callback?code=...`. On that device nothing is listening, so the page fails to load. That is expected.
+3. Copy the whole address from the address bar and paste it into the terminal.
+
+osmctl checks that the pasted address belongs to the login it started before using the code.
 
 ## CI and machines without a keychain
 
@@ -59,21 +65,17 @@ Treat tokens like passwords: anyone holding one can edit the map as you.
 
 ## OAuth applications and self-hosted instances
 
-OAuth applications are registered separately on every OpenStreetMap instance. To use osmctl with an instance that has no osmctl application yet, register one:
+OAuth applications are registered separately on every OpenStreetMap instance. osmctl includes one for openstreetmap.org. For the [development server](https://master.apis.dev.openstreetmap.org) or a self-hosted instance, register one:
 
 1. Log in to the instance's website and open `/oauth2/applications/new`.
 2. Name it `osmctl` and leave **Confidential application** unchecked: osmctl is a public client and uses PKCE.
-3. Add both redirect URIs:
-   ```
-   http://127.0.0.1:41117/callback
-   urn:ietf:wg:oauth:2.0:oob
-   ```
+3. Set the redirect URI to `http://127.0.0.1:41117/callback`. It serves both the browser login and `--manual`.
 4. Grant the permissions osmctl requests: `read_prefs`, `write_api`, `write_notes` and `write_changeset_comments`.
 5. Save, then pass the **Client ID** to osmctl:
 
 ```sh
 export OSMCTL_CLIENT_ID=<client id>
-osmctl --server https://osm.example.org auth login
+osmctl --server dev auth login
 ```
 
 The client ID of a public application is not a secret.

@@ -32,6 +32,8 @@ var known = map[string]Server{
 		Web:       "https://www.openstreetmap.org",
 		Overpass:  "https://overpass-api.de/api/interpreter",
 		Nominatim: "https://nominatim.openstreetmap.org",
+		// A public client: PKCE replaces the secret, so the id is not sensitive.
+		ClientID: "wQkC1LQmdrFVHWI770fg74tyH3lPJLLRE_l4nfH2pPo",
 	},
 	Dev: {
 		Name: Dev,

@@ -33,8 +33,9 @@ func newAuthLoginCmd(a *app) *cobra.Command {
 		Long: `Authorize osmctl with your OpenStreetMap account.
 
 By default this opens your browser and receives the result on
-http://127.0.0.1:41117. Use --manual on remote machines to paste the code
-instead, or --with-token to read an existing token from standard input.`,
+http://127.0.0.1:41117. On a remote machine use --manual: approve in any
+browser, then paste the address it was sent to. --with-token reads an
+existing token from standard input.`,
 		Example: `  osmctl auth login
   osmctl --server dev auth login
   osmctl auth login --manual
@@ -71,7 +72,7 @@ instead, or --with-token to read an existing token from standard input.`,
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&manual, "manual", false, "paste the authorization code instead of using a local redirect")
+	cmd.Flags().BoolVar(&manual, "manual", false, "paste the redirect address instead of listening for it (remote machines)")
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "read an access token from standard input")
 	cmd.MarkFlagsMutuallyExclusive("manual", "with-token")
 	return cmd

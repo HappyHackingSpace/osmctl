@@ -7,8 +7,9 @@ Authorize osmctl with your OpenStreetMap account
 Authorize osmctl with your OpenStreetMap account.
 
 By default this opens your browser and receives the result on
-http://127.0.0.1:41117. Use --manual on remote machines to paste the code
-instead, or --with-token to read an existing token from standard input.
+http://127.0.0.1:41117. On a remote machine use --manual: approve in any
+browser, then paste the address it was sent to. --with-token reads an
+existing token from standard input.
 
 ```
 osmctl auth login [flags]
@@ -27,7 +28,7 @@ osmctl auth login [flags]
 
 ```
   -h, --help         help for login
-      --manual       paste the authorization code instead of using a local redirect
+      --manual       paste the redirect address instead of listening for it (remote machines)
       --with-token   read an access token from standard input
 ```
 

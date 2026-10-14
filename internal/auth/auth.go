@@ -82,8 +82,8 @@ func Transport(token string, base http.RoundTripper) http.RoundTripper {
 func config(srv server.Server, redirect string) (*oauth2.Config, error) {
 	if srv.ClientID == "" {
 		return nil, fmt.Errorf("no OAuth client id for %s: register a public application at %s/oauth2/applications/new "+
-			"(redirect URIs %s and %s, scopes %s), then set OSMCTL_CLIENT_ID",
-			srv.Name, srv.Web, LoopbackRedirect, OOBRedirect, strings.Join(Scopes, " "))
+			"(redirect URI %s, scopes %s), then set OSMCTL_CLIENT_ID",
+			srv.Name, srv.Web, LoopbackRedirect, strings.Join(Scopes, " "))
 	}
 	return &oauth2.Config{
 		ClientID:    srv.ClientID,

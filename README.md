@@ -85,7 +85,7 @@ osmctl needs no config file. These environment variables change its defaults:
 |---|---|
 | `OSMCTL_SERVER` | default server: `osm` (production), `dev` (sandbox) or a URL |
 | `OSMCTL_TOKEN` | OAuth 2.0 access token, for CI and machines without a keychain |
-| `OSMCTL_CLIENT_ID` | OAuth application id, for self-hosted instances |
+| `OSMCTL_CLIENT_ID` | OAuth application id for the dev server or a self-hosted instance (openstreetmap.org works out of the box) |
 | `OSMCTL_OVERPASS_URL` | another Overpass instance |
 | `OSMCTL_NOMINATIM_URL` | another Nominatim instance |
 | `OSMCTL_API_URL` | override the API base URL |

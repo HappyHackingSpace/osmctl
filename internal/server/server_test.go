@@ -31,3 +31,15 @@ func TestLookupEnvOverride(t *testing.T) {
 		t.Errorf("override ignored: %s", s.Overpass)
 	}
 }
+
+func TestProductionHasBuiltinClientID(t *testing.T) {
+	t.Setenv("OSMCTL_CLIENT_ID", "")
+	s, err := Lookup(Production)
+	if err != nil || s.ClientID == "" {
+		t.Fatalf("production must work without OSMCTL_CLIENT_ID: %+v, %v", s, err)
+	}
+	t.Setenv("OSMCTL_CLIENT_ID", "override")
+	if s, _ := Lookup(Production); s.ClientID != "override" {
+		t.Errorf("OSMCTL_CLIENT_ID should override the built-in id, got %q", s.ClientID)
+	}
+}

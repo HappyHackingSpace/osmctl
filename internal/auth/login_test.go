@@ -36,10 +36,6 @@ func fakeOSM(t *testing.T) *httptest.Server {
 		mu.Unlock()
 		target, _ := url.Parse(q.Get("redirect_uri"))
 		target.RawQuery = url.Values{"code": {"the-code"}, "state": {q.Get("state")}}.Encode()
-		if q.Get("redirect_uri") == OOBRedirect {
-			_, _ = io.WriteString(w, "the-code")
-			return
-		}
 		http.Redirect(w, r, target.String(), http.StatusFound)
 	})
 	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
@@ -82,32 +78,36 @@ func TestLoginLoopback(t *testing.T) {
 	}
 }
 
+// pasteRedirect acts as the user on a remote machine: it approves in a browser
+// that cannot reach osmctl and pastes the address the browser was sent to.
+func pasteRedirect(t *testing.T, out *io.PipeReader, in *io.PipeWriter, edit func(string) string) {
+	t.Helper()
+	buf := make([]byte, 4096)
+	n, _ := io.ReadAtLeast(out, buf, 1)
+	go func() { _, _ = io.Copy(io.Discard, out) }()
+	var authURL string
+	for _, f := range strings.Fields(string(buf[:n])) {
+		if strings.Contains(f, "/oauth2/authorize") {
+			authURL = f
+		}
+	}
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := noFollow.Get(authURL)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	_ = resp.Body.Close()
+	_, _ = io.WriteString(in, edit(resp.Header.Get("Location"))+"\n")
+}
+
 func TestLoginManual(t *testing.T) {
 	osmSrv := fakeOSM(t)
 	srv := server.Server{Name: "test", Web: osmSrv.URL, ClientID: "test-client"}
 
 	outR, outW := io.Pipe()
 	inR, inW := io.Pipe()
-	go func() {
-		// Act as the user: read the URL from the prompt, visit it, paste the code.
-		buf := make([]byte, 4096)
-		n, _ := io.ReadAtLeast(outR, buf, 1)
-		var authURL string
-		for _, f := range strings.Fields(string(buf[:n])) {
-			if strings.HasPrefix(f, "http") {
-				authURL = f
-			}
-		}
-		go func() { _, _ = io.Copy(io.Discard, outR) }()
-		resp, err := http.Get(authURL)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		code, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		_, _ = inW.Write(append(code, '\n'))
-	}()
+	go pasteRedirect(t, outR, inW, func(u string) string { return u })
 
 	tok, err := Login(context.Background(), srv, LoginOptions{Manual: true, In: inR, Out: outW})
 	if err != nil {
@@ -115,6 +115,34 @@ func TestLoginManual(t *testing.T) {
 	}
 	if tok != "secret-token" {
 		t.Errorf("token = %q", tok)
+	}
+}
+
+func TestLoginManualRejectsForgedState(t *testing.T) {
+	osmSrv := fakeOSM(t)
+	srv := server.Server{Name: "test", Web: osmSrv.URL, ClientID: "test-client"}
+
+	outR, outW := io.Pipe()
+	inR, inW := io.Pipe()
+	go pasteRedirect(t, outR, inW, func(u string) string {
+		parsed, _ := url.Parse(u)
+		q := parsed.Query()
+		q.Set("state", "forged")
+		parsed.RawQuery = q.Encode()
+		return parsed.String()
+	})
+
+	_, err := Login(context.Background(), srv, LoginOptions{Manual: true, In: inR, Out: outW})
+	if err == nil || !strings.Contains(err.Error(), "mismatched state") {
+		t.Errorf("err = %v, want a state mismatch", err)
+	}
+}
+
+func TestLoginManualNeedsTheFullAddress(t *testing.T) {
+	srv := server.Server{Name: "test", Web: "https://osm.invalid", ClientID: "test-client"}
+	_, err := Login(context.Background(), srv, LoginOptions{Manual: true, In: strings.NewReader("just-a-code\n"), Out: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "full address") {
+		t.Errorf("err = %v", err)
 	}
 }
 

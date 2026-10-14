@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,15 +23,15 @@ import (
 
 const (
 	// The port is fixed because OSM matches redirect URIs exactly as registered.
+	// It is the only redirect osmctl uses: OSM accepts https and 127.0.0.1
+	// redirects, not the out-of-band urn.
 	LoopbackAddr     = "127.0.0.1:41117"
 	LoopbackRedirect = "http://" + LoopbackAddr + "/callback"
-	// OOBRedirect makes OSM show the code on a page for the user to paste,
-	// for machines where osmctl cannot receive the browser redirect.
-	OOBRedirect = "urn:ietf:wg:oauth:2.0:oob"
 )
 
 type LoginOptions struct {
-	// Manual uses copy and paste instead of a local redirect listener.
+	// Manual asks the user to paste the redirect URL instead of listening for
+	// it, for machines the browser cannot reach.
 	Manual bool
 	Open   func(url string) error
 	In     io.Reader
@@ -40,11 +41,7 @@ type LoginOptions struct {
 
 // Login runs the authorization code flow with PKCE and returns the access token.
 func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, error) {
-	redirect := LoopbackRedirect
-	if opts.Manual {
-		redirect = OOBRedirect
-	}
-	cfg, err := config(srv, redirect)
+	cfg, err := config(srv, LoopbackRedirect)
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +58,7 @@ func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, e
 
 	var code string
 	if opts.Manual {
-		code, err = manualCode(opts, authURL)
+		code, err = manualCode(opts, authURL, state)
 	} else {
 		code, err = loopbackCode(ctx, opts, authURL, state)
 	}
@@ -76,17 +73,39 @@ func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, e
 	return tok.AccessToken, nil
 }
 
-func manualCode(opts LoginOptions, authURL string) (string, error) {
-	fmt.Fprintf(opts.Out, "Open this URL, approve osmctl, then paste the code shown:\n\n  %s\n\nCode: ", authURL)
+// manualCode has the user paste the address their browser was sent to. On a
+// remote machine that page fails to load, but its URL still carries the code.
+func manualCode(opts LoginOptions, authURL, state string) (string, error) {
+	fmt.Fprintf(opts.Out, "1. Open this URL in any browser and approve osmctl:\n\n  %s\n\n"+
+		"2. The browser then goes to %s?code=..., which will not load. That is expected.\n"+
+		"3. Copy that whole address from the address bar and paste it here.\n\nURL: ", authURL, LoopbackRedirect)
 	line, err := bufio.NewReader(opts.In).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
-	code := strings.TrimSpace(line)
-	if code == "" {
-		return "", errors.New("no code entered")
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", errors.New("nothing pasted")
 	}
-	return code, nil
+	u, err := url.Parse(line)
+	if err != nil || u.RawQuery == "" {
+		return "", errors.New("paste the full address from the browser, starting with " + LoopbackRedirect)
+	}
+	return callbackCode(u.Query(), state)
+}
+
+// callbackCode validates the redirect parameters and returns the code. The
+// state check rejects redirects from a login osmctl did not start.
+func callbackCode(q url.Values, state string) (string, error) {
+	switch {
+	case q.Get("error") != "":
+		return "", fmt.Errorf("authorization denied: %s %s", q.Get("error"), q.Get("error_description"))
+	case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1:
+		return "", errors.New("login redirect had a mismatched state; aborting")
+	case q.Get("code") == "":
+		return "", errors.New("login redirect carried no code")
+	}
+	return q.Get("code"), nil
 }
 
 func loopbackCode(ctx context.Context, opts LoginOptions, authURL, state string) (string, error) {
@@ -107,16 +126,8 @@ func loopbackCode(ctx context.Context, opts LoginOptions, authURL, state string)
 				http.NotFound(w, r)
 				return
 			}
-			q := r.URL.Query()
-			res := result{code: q.Get("code")}
-			switch {
-			case q.Get("error") != "":
-				res.err = fmt.Errorf("authorization denied: %s %s", q.Get("error"), q.Get("error_description"))
-			case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(state)) != 1:
-				res.err = errors.New("login redirect had a mismatched state; aborting")
-			case res.code == "":
-				res.err = errors.New("login redirect carried no code")
-			}
+			var res result
+			res.code, res.err = callbackCode(r.URL.Query(), state)
 			page(w, res.err)
 			select {
 			case done <- res:
