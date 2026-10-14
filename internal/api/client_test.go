@@ -158,7 +158,7 @@ func TestUploadDeletesParentsBeforeNodes(t *testing.T) {
 	if strings.Index(create, "<node") > strings.Index(create, "<way") {
 		t.Errorf("create must list nodes before the ways using them:\n%s", create)
 	}
-	del := body[strings.Index(body, "<delete>"):]
+	del := body[strings.LastIndex(body, "<delete>"):]
 	if strings.Index(del, "<way") > strings.Index(del, "<node") {
 		t.Errorf("delete must list ways before their nodes:\n%s", del)
 	}

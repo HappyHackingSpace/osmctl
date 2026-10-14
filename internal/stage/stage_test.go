@@ -274,7 +274,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Errorf("another server should have its own empty stage: %v", err)
 	}
 
-	got.Reset(0)
+	got.Clear()
 	if err := got.Save(); err != nil {
 		t.Fatal(err)
 	}

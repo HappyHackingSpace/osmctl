@@ -214,12 +214,11 @@ func (s *Stage) stagedUserOf(id osm.FeatureID) osm.FeatureID {
 	return 0
 }
 
-// Reset unstages one element, or everything when id is zero.
+// Clear unstages everything.
+func (s *Stage) Clear() { *s = *New(s.Server) }
+
+// Reset unstages one element.
 func (s *Stage) Reset(id osm.FeatureID) error {
-	if id == 0 {
-		*s = *New(s.Server)
-		return nil
-	}
 	if find(s.Create, id) == nil && find(s.Modify, id) == nil && find(s.Delete, id) == nil {
 		return fmt.Errorf("%s has no staged changes", id)
 	}

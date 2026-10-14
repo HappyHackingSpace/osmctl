@@ -99,7 +99,7 @@ Practice on the sandbox with --server dev before editing the real map.`,
 			if err != nil {
 				return err
 			}
-			s.Reset(0)
+			s.Clear()
 			if err := s.Save(); err != nil {
 				return fmt.Errorf("pushed changeset %d but could not clear the stage: %w", id, err)
 			}

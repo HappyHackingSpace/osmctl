@@ -4,7 +4,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -218,7 +217,7 @@ so the server can detect conflicts.`,
 		Example: "  osmctl apply fixes.osc\n  python fix_names.py | osmctl apply -",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			var r io.Reader = a.in
+			r := a.in
 			if args[0] != "-" {
 				f, err := os.Open(args[0])
 				if err != nil {
@@ -304,7 +303,8 @@ func newResetCmd(a *app) *cobra.Command {
 			}
 			return a.edit(func(s *stage.Stage) (string, error) {
 				if all {
-					return "Unstaged everything", s.Reset(0)
+					s.Clear()
+					return "Unstaged everything", nil
 				}
 				for _, arg := range args {
 					id, err := osmref.Parse(arg)
