@@ -77,8 +77,9 @@ func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, e
 // remote machine that page fails to load, but its URL still carries the code.
 func manualCode(opts LoginOptions, authURL, state string) (string, error) {
 	fmt.Fprintf(opts.Out, "1. Open this URL in any browser and approve osmctl:\n\n  %s\n\n"+
-		"2. The browser then goes to %s?code=..., which will not load. That is expected.\n"+
-		"3. Copy that whole address from the address bar and paste it here.\n\nURL: ", authURL, LoopbackRedirect)
+		"2. The browser then shows an error such as \"127.0.0.1 refused to connect\". That is expected:\n"+
+		"   osmctl is not listening in manual mode, but the address bar holds the code.\n"+
+		"3. Copy the whole address (it starts with %s?code=) and paste it here.\n\nURL: ", authURL, LoopbackRedirect)
 	line, err := bufio.NewReader(opts.In).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err

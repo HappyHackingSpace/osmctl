@@ -41,7 +41,7 @@ osmctl auth login --manual
 ```
 
 1. Open the printed URL in a browser on any device and approve osmctl.
-2. The browser is sent to `http://127.0.0.1:41117/callback?code=...`. On that device nothing is listening, so the page fails to load. That is expected.
+2. The browser is sent to `http://127.0.0.1:41117/callback?code=...` and shows an error such as "127.0.0.1 refused to connect". That is expected: osmctl is not listening in manual mode, but the address holds the code.
 3. Copy the whole address from the address bar and paste it into the terminal.
 
 osmctl checks that the pasted address belongs to the login it started before using the code.
