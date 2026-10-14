@@ -48,6 +48,18 @@ osmctl add way --nodes n-1,n-2,n2187164523 highway=footway
 
 Add `--close` to close the way into a ring for an area, such as a building. On push the server assigns real ids and osmctl prints the mapping.
 
+## Connecting to existing roads
+
+A new road only joins the network if it shares a node with an existing one. Put a node onto the existing way, then start the new way there:
+
+```sh
+osmctl add node --at 37.91430,40.23050 --on way/123456     # n-1, snapped onto way/123456
+osmctl add node --at 37.91600,40.23300                     # n-2
+osmctl add way --nodes n-1,n-2 highway=track
+```
+
+`--on` moves the point to the nearest spot on the way and inserts the node there. If one of the way's nodes is already within a metre, that node is used instead. Repeat `--on` to create a junction shared by several ways, for example where a new path meets two roads at once. `osmctl check` warns about roads that are not connected to anything.
+
 ## Moving and deleting
 
 ```sh

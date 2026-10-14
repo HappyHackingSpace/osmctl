@@ -73,12 +73,23 @@ func newAddCmd(a *app) *cobra.Command {
 that you can use in later commands; the server assigns real ids on push.`,
 	}
 
-	var at string
+	var (
+		at string
+		on []string
+	)
 	node := &cobra.Command{
-		Use:     "node --at <lat,lon> [key=value]...",
-		Short:   "Add a point, such as a shop, bench or tree",
-		Example: `  osmctl add node --at 37.9144,40.2306 amenity=bench backrest=yes`,
-		RunE: func(_ *cobra.Command, args []string) error {
+		Use:   "node --at <lat,lon> [--on <way>]... [key=value]...",
+		Short: "Add a point, or a node on existing ways to connect to them",
+		Long: `Add a node at a location.
+
+With --on, the node is placed onto the nearest point of that way instead,
+so new roads can be joined to it. Repeat --on to make a junction shared by
+several ways. If a node of the way is already within a metre, that node is
+used instead of adding a new one next to it.`,
+		Example: `  osmctl add node --at 37.9144,40.2306 amenity=bench backrest=yes
+  osmctl add node --at 38.43412,40.28429 --on way/362907199
+  osmctl add node --at 38.4401,40.2853 --on w1568227783 --on w362907199`,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := geo.ParsePoint(at)
 			if err != nil {
 				return err
@@ -87,12 +98,32 @@ that you can use in later commands; the server assigns real ids on push.`,
 			if err != nil {
 				return err
 			}
+			ways := make([]osm.ID, 0, len(on))
+			for _, ref := range on {
+				id, err := osm.ParseID(ref)
+				if err != nil {
+					return err
+				}
+				ways = append(ways, id)
+			}
 			return a.edit(func(s *stage.Stage) (string, error) {
-				return "Added " + s.AddNode(p.Lat, p.Lon, tags).String(), nil
+				if len(ways) == 0 {
+					return "Added " + s.AddNode(p.Lat, p.Lon, tags).String(), nil
+				}
+				id, created, err := s.AddNodeOnWays(cmd.Context(), a.client(), ways, p.Lat, p.Lon, tags)
+				if err != nil {
+					return "", err
+				}
+				verb := "Added"
+				if !created {
+					verb = "Using existing"
+				}
+				return fmt.Sprintf("%s %s on %s (use it in add way --nodes)", verb, id, strings.Join(on, ", ")), nil
 			})
 		},
 	}
 	node.Flags().StringVar(&at, "at", "", "location as lat,lon")
+	node.Flags().StringSliceVar(&on, "on", nil, "place the node onto this way (repeatable)")
 	_ = node.MarkFlagRequired("at")
 
 	var (
@@ -103,8 +134,8 @@ that you can use in later commands; the server assigns real ids on push.`,
 		Use:   "way --nodes <n1,n2,...> [key=value]...",
 		Short: "Add a line or area through existing or staged nodes",
 		Example: `  osmctl add node --at 37.91,40.23
-  osmctl add node --at 37.92,40.24
-  osmctl add way --nodes n-1,n-2,n123456 highway=footway`,
+  osmctl add node --at 37.92,40.24 --on way/123456
+  osmctl add way --nodes n-1,n-2 highway=footway`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			ids := make([]int64, 0, len(nodes)+1)
 			for _, ref := range nodes {

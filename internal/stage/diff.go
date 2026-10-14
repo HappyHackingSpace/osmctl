@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/happyhackingspace/osmctl/internal/osm"
 )
@@ -107,7 +108,7 @@ func describe(base, el osm.Element) []string {
 		if b, ok := base.(*osm.Way); !ok {
 			return []string{fmt.Sprintf("nodes %v", v.Nodes)}
 		} else if !slices.Equal(b.Nodes, v.Nodes) {
-			return []string{fmt.Sprintf("nodes %v -> %v", b.Nodes, v.Nodes)}
+			return []string{nodeChanges(b.Nodes, v.Nodes)}
 		}
 	case *osm.Relation:
 		if b, ok := base.(*osm.Relation); !ok {
@@ -132,4 +133,36 @@ func (s *Stage) List() []Entry {
 		}
 	}
 	return out
+}
+
+// nodeChanges summarises how a way's node list changed. Listing both full
+// lists would bury a single inserted node among dozens of unchanged ones.
+func nodeChanges(old, new []int64) string {
+	had := map[int64]bool{}
+	for _, n := range old {
+		had[n] = true
+	}
+	has := map[int64]bool{}
+	for _, n := range new {
+		has[n] = true
+	}
+	var parts []string
+	for i, n := range new {
+		if !had[n] {
+			where := "at the start"
+			if i > 0 {
+				where = fmt.Sprintf("after node/%d", new[i-1])
+			}
+			parts = append(parts, fmt.Sprintf("+ node/%d %s", n, where))
+		}
+	}
+	for _, n := range old {
+		if !has[n] {
+			parts = append(parts, fmt.Sprintf("- node/%d", n))
+		}
+	}
+	if len(parts) == 0 {
+		return "nodes reordered"
+	}
+	return fmt.Sprintf("nodes %d -> %d: %s", len(old), len(new), strings.Join(parts, ", "))
 }

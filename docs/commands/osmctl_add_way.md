@@ -10,8 +10,8 @@ osmctl add way --nodes <n1,n2,...> [key=value]... [flags]
 
 ```
   osmctl add node --at 37.91,40.23
-  osmctl add node --at 37.92,40.24
-  osmctl add way --nodes n-1,n-2,n123456 highway=footway
+  osmctl add node --at 37.92,40.24 --on way/123456
+  osmctl add way --nodes n-1,n-2 highway=footway
 ```
 
 ### Options

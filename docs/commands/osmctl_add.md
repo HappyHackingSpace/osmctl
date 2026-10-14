@@ -23,6 +23,6 @@ that you can use in later commands; the server assigns real ids on push.
 ### SEE ALSO
 
 * [osmctl](osmctl.md)	 - Read, query, edit and contribute to OpenStreetMap from the terminal
-* [osmctl add node](osmctl_add_node.md)	 - Add a point, such as a shop, bench or tree
+* [osmctl add node](osmctl_add_node.md)	 - Add a point, or a node on existing ways to connect to them
 * [osmctl add way](osmctl_add_way.md)	 - Add a line or area through existing or staged nodes
 
