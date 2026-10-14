@@ -66,6 +66,11 @@ func Execute(ctx context.Context, version string) int {
 	return 0
 }
 
+// NewRoot builds the command tree without running it, for documentation tools.
+func NewRoot(version string) *cobra.Command {
+	return newRoot(&app{version: version, store: auth.Keyring{}, in: os.Stdin, out: os.Stdout, errOut: os.Stderr})
+}
+
 func newRoot(a *app) *cobra.Command {
 	defaultServer := server.Production
 	if v := os.Getenv("OSMCTL_SERVER"); v != "" {

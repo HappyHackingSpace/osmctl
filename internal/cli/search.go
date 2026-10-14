@@ -99,17 +99,19 @@ func newFindCmd(a *app) *cobra.Command {
 		Short: "Find map features by tag, near a point, in a box or in a named place",
 		Long: `Find map features by tag without writing Overpass QL.
 
-Every filter must match:
+Every filter must match. Quote filters containing !, which shells
+otherwise treat as history expansion:
   key            the tag is present         amenity
-  !key           the tag is absent          !name
+  !key           the tag is absent          '!name'
   key=value      exact match                amenity=cafe
-  key!=value     anything but               cuisine!=pizza
+  key!=value     anything but               'cuisine!=pizza'
   key~regex      regular expression         name~^Kafe
+  key!~regex     does not match             'name!~bar'
 
 --in looks the place up with Nominatim and searches inside its boundary.`,
 		Example: `  osmctl find amenity=cafe --near 37.9144,40.2306 --radius 500
   osmctl find amenity=drinking_water --in "Diyarbakır"
-  osmctl find highway=bus_stop !name --bbox 40.20,37.90,40.25,37.93
+  osmctl find highway=bus_stop '!name' --bbox 40.20,37.90,40.25,37.93
   osmctl find tourism=museum --in "Berlin" -o geojson > museums.geojson
   osmctl find shop=bakery --in "Amed" --show-query`,
 		Args: cobra.MinimumNArgs(1),

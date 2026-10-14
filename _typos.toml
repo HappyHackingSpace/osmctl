@@ -1,3 +1,5 @@
 [default.extend-words]
 # <nd ref="..."/> is the OSM XML element for a way's node reference.
 nd = "nd"
+# Sur is the old-city district of Diyarbakır, used in examples.
+Sur = "Sur"
