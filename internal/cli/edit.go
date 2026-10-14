@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/geo"
+	"github.com/happyhackingspace/osmctl/internal/gpx"
 	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/stage"
@@ -130,13 +131,32 @@ used instead of adding a new one next to it.`,
 		nodes  []string
 		closed bool
 	)
+	var (
+		gpxFile, startOn, endOn string
+		track                   int
+		tolerance               float64
+	)
 	way := &cobra.Command{
-		Use:   "way --nodes <n1,n2,...> [key=value]...",
-		Short: "Add a line or area through existing or staged nodes",
+		Use:   "way (--nodes <n1,n2,...> | --from-gpx <file>) [key=value]...",
+		Short: "Add a line or area through nodes, or from a GPS track",
+		Long: `Add a way through existing or staged nodes, or from a recorded GPS track.
+
+With --from-gpx, the track is simplified (Douglas-Peucker, --simplify metres)
+so GPS jitter does not become hundreds of nodes. --start-on and --end-on
+place the first and last node onto existing ways, so the new road is
+connected to the network.`,
 		Example: `  osmctl add node --at 37.91,40.23
   osmctl add node --at 37.92,40.24 --on way/123456
-  osmctl add way --nodes n-1,n-2 highway=footway`,
-		RunE: func(_ *cobra.Command, args []string) error {
+  osmctl add way --nodes n-1,n-2 highway=footway
+  osmctl add way --from-gpx drive.gpx --start-on way/362907199 highway=track surface=unpaved`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tags, err := stage.ParseTags(args)
+			if err != nil {
+				return err
+			}
+			if gpxFile != "" {
+				return a.addWayFromGPX(cmd.Context(), gpxFile, track, tolerance, startOn, endOn, tags)
+			}
 			ids := make([]int64, 0, len(nodes)+1)
 			for _, ref := range nodes {
 				id, err := parseNodeRef(ref)
@@ -148,19 +168,23 @@ used instead of adding a new one next to it.`,
 			if closed && len(ids) > 0 && ids[0] != ids[len(ids)-1] {
 				ids = append(ids, ids[0])
 			}
-			tags, err := stage.ParseTags(args)
-			if err != nil {
-				return err
-			}
 			return a.edit(func(s *stage.Stage) (string, error) {
 				id, err := s.AddWay(ids, tags)
 				return "Added " + id.String(), err
 			})
 		},
 	}
-	way.Flags().StringSliceVar(&nodes, "nodes", nil, "node ids in order, e.g. n-1,n-2,n123")
-	way.Flags().BoolVar(&closed, "close", false, "close the way into a ring (for areas)")
-	_ = way.MarkFlagRequired("nodes")
+	wf := way.Flags()
+	wf.StringSliceVar(&nodes, "nodes", nil, "node ids in order, e.g. n-1,n-2,n123")
+	wf.BoolVar(&closed, "close", false, "close the way into a ring (for areas)")
+	wf.StringVar(&gpxFile, "from-gpx", "", "build the way from a GPX track")
+	wf.IntVar(&track, "track", 1, "which track or route in the GPX file (1 is the first)")
+	wf.Float64Var(&tolerance, "simplify", 3, "with --from-gpx: drop points within this many metres of the line")
+	wf.StringVar(&startOn, "start-on", "", "with --from-gpx: place the first node onto this way")
+	wf.StringVar(&endOn, "end-on", "", "with --from-gpx: place the last node onto this way")
+	way.MarkFlagsOneRequired("nodes", "from-gpx")
+	way.MarkFlagsMutuallyExclusive("nodes", "from-gpx")
+	way.MarkFlagsMutuallyExclusive("close", "from-gpx")
 
 	var members []string
 	relation := &cobra.Command{
@@ -188,6 +212,50 @@ used instead of adding a new one next to it.`,
 
 	cmd.AddCommand(node, way, relation)
 	return cmd
+}
+
+func (a *app) addWayFromGPX(ctx context.Context, file string, track int, tolerance float64, startOn, endOn string, tags osm.Tags) error {
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	tracks, err := gpx.Read(f)
+	_ = f.Close()
+	if err != nil {
+		return err
+	}
+	if track < 1 || track > len(tracks) {
+		return fmt.Errorf("%s has %d track(s); --track must be between 1 and %d", file, len(tracks), len(tracks))
+	}
+	t := tracks[track-1]
+	pts := gpx.Simplify(t.Points, tolerance)
+	if len(pts) < 2 {
+		return fmt.Errorf("track %d has fewer than two points", track)
+	}
+	if len(pts) > stage.MaxWayNodes {
+		return fmt.Errorf("the simplified track still has %d points, more than a way may have (%d); raise --simplify", len(pts), stage.MaxWayNodes)
+	}
+	ends := map[int]string{0: startOn, len(pts) - 1: endOn}
+	return a.edit(func(s *stage.Stage) (string, error) {
+		ids := make([]int64, 0, len(pts))
+		for i, p := range pts {
+			if on := ends[i]; on != "" {
+				w, err := osm.ParseID(on)
+				if err != nil {
+					return "", err
+				}
+				id, _, err := s.AddNodeOnWays(ctx, a.client(), []osm.ID{w}, p.Lat, p.Lon, nil)
+				if err != nil {
+					return "", err
+				}
+				ids = append(ids, id.Ref)
+				continue
+			}
+			ids = append(ids, s.AddNode(p.Lat, p.Lon, nil).Ref)
+		}
+		id, err := s.AddWay(ids, tags)
+		return fmt.Sprintf("Added %s with %d nodes from %d GPS points", id, len(ids), len(t.Points)), err
+	})
 }
 
 func parseMembers(args []string) ([]osm.Member, error) {

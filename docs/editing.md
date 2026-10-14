@@ -60,6 +60,20 @@ osmctl add way --nodes n-1,n-2 highway=track
 
 `--on` moves the point to the nearest spot on the way and inserts the node there. If one of the way's nodes is already within a metre, that node is used instead. Repeat `--on` to create a junction shared by several ways, for example where a new path meets two roads at once. `osmctl check` warns about roads that are not connected to anything.
 
+## From a GPS track
+
+A track you recorded while driving or walking a road is the best source for its shape. Import it from a GPX file (OsmAnd, Strava, Garmin and most phone apps export GPX):
+
+```sh
+osmctl add way --from-gpx drive.gpx --start-on way/362907199 highway=track surface=unpaved
+osmctl push -m "Add track to the shrine from GPS" --source GPS
+```
+
+- The track is simplified so GPS jitter doesn't turn into hundreds of nodes: points within `--simplify` metres (default 3) of the line are dropped.
+- `--start-on` and `--end-on` place the first and last node onto existing ways, so the road is connected.
+- `--track N` picks a track when the file has several.
+- `osmctl check` warns if the new road runs along one that is already mapped.
+
 ## Relations
 
 Relations group elements with roles: routes, multipolygons, turn restrictions.
@@ -125,7 +139,7 @@ osmctl check
 | Kind | Examples | Effect |
 |---|---|---|
 | error | an untagged new node that belongs to nothing, a way using a node staged for deletion, the same node twice in a row | `push` refuses to upload |
-| warning | a road not connected to any other road, a road crossing another road, railway or waterway without a shared node, deprecated tags such as `highway=ford`, `highway=road`, a vague changeset comment | shown before you confirm |
+| warning | a road running along an already mapped road, a road not connected to any other road, a road crossing another road, railway or waterway without a shared node, deprecated tags such as `highway=ford`, `highway=road`, a vague changeset comment | shown before you confirm |
 
 The connection and crossing checks download the map around your edits. Roads marked `bridge`, `tunnel` or a different `layer` are not reported as crossings. Use `--offline` to skip the download, or `push --no-check` to skip the checks entirely.
 

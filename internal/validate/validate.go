@@ -148,6 +148,9 @@ func wayShape(s *stage.Stage) []Issue {
 		for _, n := range w.Nodes {
 			distinct[n] = true
 		}
+		if len(w.Nodes) > stage.MaxWayNodes {
+			out = append(out, Issue{Error, id, "too-many-nodes", fmt.Sprintf("way has %d nodes; the API allows at most %d, so split it", len(w.Nodes), stage.MaxWayNodes)})
+		}
 		if len(distinct) < 2 {
 			out = append(out, Issue{Error, id, "short-way", "way needs at least two different nodes"})
 		}

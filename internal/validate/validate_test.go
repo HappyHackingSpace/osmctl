@@ -163,3 +163,29 @@ func TestRelationChecks(t *testing.T) {
 		t.Errorf("issues = %v", got)
 	}
 }
+
+func TestTooManyNodes(t *testing.T) {
+	s := stage.New("https://example.org")
+	nodes := make([]int64, stage.MaxWayNodes+1)
+	for i := range nodes {
+		nodes[i] = int64(i + 1)
+	}
+	s.Modify = &osm.Data{Ways: []*osm.Way{{ID: 9, Nodes: nodes, Tags: road, Meta: osm.Meta{Version: 1}}}}
+	if got := codes(Check(context.Background(), s, nil)); got["too-many-nodes"] != 1 {
+		t.Errorf("issues = %v", got)
+	}
+}
+
+func TestDuplicateRoad(t *testing.T) {
+	s := stage.New("https://example.org")
+	// Follows the existing north-south road 100 a few metres to its east.
+	a := s.AddNode(-0.0005, 0.00003, nil)
+	b := s.AddNode(0, 0.00002, nil)
+	c := s.AddNode(0.0005, 0.00003, nil)
+	if _, err := s.AddWay([]int64{a.Ref, b.Ref, c.Ref, 3}, road); err != nil {
+		t.Fatal(err)
+	}
+	if got := codes(Check(context.Background(), s, &fakeMap{data: existing()})); got["duplicate-road"] != 1 {
+		t.Errorf("issues = %v", got)
+	}
+}
