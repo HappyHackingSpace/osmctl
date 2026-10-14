@@ -15,7 +15,7 @@ Other OSM command line tools each cover one job: osmium handles files, Overpass 
 |---|---|
 | **Read** | elements, full history, changesets with discussions, users, raw map data |
 | **Search** | tag searches near a point, in a box or in a named place; raw Overpass QL; geocoding and reverse geocoding |
-| **Edit** | a git-like workflow: stage tags, nodes, ways, moves and deletions, review the diff, push one atomic changeset |
+| **Edit** | a git-like workflow: stage tags, nodes, ways, moves and deletions, review the diff, check for mistakes, push one atomic changeset |
 | **Contribute** | create, comment on, close and reopen map notes; comment on changesets |
 | **Work offline** | download regional extracts, inspect `.osm.pbf` files, extract features by tag or area |
 | **Integrate** | every command prints `text`, `json`, `xml` or `geojson`, ready for `jq`, QGIS, JOSM or your scripts |
@@ -57,6 +57,7 @@ osmctl tag node/123 wheelchair=yes fixme-
 osmctl add node --at 37.9144,40.2306 amenity=bench backrest=yes
 osmctl status
 osmctl diff
+osmctl check
 osmctl push -m "Add bench and wheelchair access from survey" --source survey
 
 # Offline

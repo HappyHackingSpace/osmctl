@@ -15,6 +15,7 @@ import (
 	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/stage"
+	"github.com/happyhackingspace/osmctl/internal/validate"
 )
 
 // bulkThreshold is where an upload starts to look like an automated edit,
@@ -25,14 +26,15 @@ func newPushCmd(a *app) *cobra.Command {
 	var (
 		comment, source, hashtags string
 		extra                     []string
-		yes                       bool
+		yes, noCheck              bool
 	)
 	cmd := &cobra.Command{
 		Use:   "push -m <comment>",
 		Short: "Upload staged changes as one changeset",
 		Long: `Upload every staged change as a single changeset.
 
-The diff is shown and you are asked to confirm first. The upload is atomic:
+The diff and the results of ` + "`osmctl check`" + ` are shown and you are asked to
+confirm first; errors stop the push. The upload is atomic:
 if any element changed on the server since you staged it, nothing is
 written and your stage is kept so you can resolve the conflict.
 
@@ -68,6 +70,18 @@ Practice on the sandbox with --server dev before editing the real map.`,
 			}
 			if err := output.Diff(a.errOut, entries, output.Text); err != nil {
 				return err
+			}
+			if !noCheck {
+				issues := append(a.validate(ctx, s, false), validate.Comment(comment)...)
+				if len(issues) > 0 {
+					fmt.Fprintln(a.errOut)
+					if err := output.Issues(a.errOut, issues, output.Text); err != nil {
+						return err
+					}
+				}
+				if validate.HasErrors(issues) {
+					return errors.New("not pushed: fix the errors above, then check again with `osmctl check`")
+				}
 			}
 			if s.Len() >= bulkThreshold {
 				fmt.Fprintf(a.errOut, "\nThis is a large edit (%d changes). Automated and mass edits must be discussed with the community first:\n  https://wiki.openstreetmap.org/wiki/Automated_Edits_code_of_conduct\n", s.Len())
@@ -118,6 +132,7 @@ Practice on the sandbox with --server dev before editing the real map.`,
 	f.StringVar(&hashtags, "hashtags", "", "hashtags for the changeset, e.g. #hhs;#mapathon")
 	f.StringSliceVar(&extra, "tag", nil, "extra changeset tag as key=value (repeatable)")
 	f.BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	f.BoolVar(&noCheck, "no-check", false, "skip the checks for mistakes (see osmctl check)")
 	return cmd
 }
 

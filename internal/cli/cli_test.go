@@ -187,3 +187,26 @@ func TestApplyStagesOsmChange(t *testing.T) {
 		t.Errorf("apply did not stage the file:\n%s", out)
 	}
 }
+
+func TestPushStopsOnCheckErrors(t *testing.T) {
+	t.Setenv(stage.DirEnv, t.TempDir())
+	t.Setenv(auth.TokenEnv, "")
+	f := newFakeOSM(t)
+	store := memStore{f.URL: "test-token"}
+	srv := []string{"--server", f.URL}
+	// An untagged node that belongs to nothing is an error.
+	if _, _, err := run(t, store, "", append(srv, "add", "node", "--at", "1,2")...); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, err := run(t, store, "y\n", append(srv, "push", "-m", "Add a node for testing the checks")...)
+	if err == nil || !strings.Contains(err.Error(), "not pushed") || !strings.Contains(errOut, "not part of any way") {
+		t.Fatalf("push should stop on errors: err=%v\n%s", err, errOut)
+	}
+	if f.uploaded != "" {
+		t.Error("a change with errors was uploaded")
+	}
+	out, _, err := run(t, store, "", append(srv, "check", "--offline")...)
+	if err == nil || !strings.Contains(out, "not part of any way") {
+		t.Errorf("check output:\n%s\nerr=%v", out, err)
+	}
+}
