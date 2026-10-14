@@ -60,6 +60,19 @@ osmctl add way --nodes n-1,n-2 highway=track
 
 `--on` moves the point to the nearest spot on the way and inserts the node there. If one of the way's nodes is already within a metre, that node is used instead. Repeat `--on` to create a junction shared by several ways, for example where a new path meets two roads at once. `osmctl check` warns about roads that are not connected to anything.
 
+## Relations
+
+Relations group elements with roles: routes, multipolygons, turn restrictions.
+
+```sh
+osmctl add relation type=route route=hiking name="Pîr Ezîz trail" --member way/1568227783 --member w-3
+osmctl member add r1234 way/5678:outer
+osmctl member add r1234 n-1:stop --at 0      # insert first; order matters for routes
+osmctl member remove r1234 way/5678
+```
+
+Members are written as an element, optionally followed by `:role`. `osmctl check` reports relations without members or without a `type` tag.
+
 ## Moving and deleting
 
 ```sh

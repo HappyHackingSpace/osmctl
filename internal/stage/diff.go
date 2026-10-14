@@ -114,7 +114,7 @@ func describe(base, el osm.Element) []string {
 		if b, ok := base.(*osm.Relation); !ok {
 			return []string{fmt.Sprintf("%d members", len(v.Members))}
 		} else if !slices.Equal(b.Members, v.Members) {
-			return []string{fmt.Sprintf("members changed (%d -> %d)", len(b.Members), len(v.Members))}
+			return []string{memberChanges(b.Members, v.Members)}
 		}
 	}
 	return nil
@@ -165,4 +165,28 @@ func nodeChanges(old, new []int64) string {
 		return "nodes reordered"
 	}
 	return fmt.Sprintf("nodes %d -> %d: %s", len(old), len(new), strings.Join(parts, ", "))
+}
+
+func memberChanges(old, new []osm.Member) string {
+	label := func(m osm.Member) string {
+		if m.Role == "" {
+			return m.ElementID().String()
+		}
+		return m.ElementID().String() + " (" + m.Role + ")"
+	}
+	var parts []string
+	for i, m := range new {
+		if !slices.Contains(old, m) {
+			parts = append(parts, fmt.Sprintf("+ %s at position %d", label(m), i))
+		}
+	}
+	for _, m := range old {
+		if !slices.Contains(new, m) {
+			parts = append(parts, "- "+label(m))
+		}
+	}
+	if len(parts) == 0 {
+		return "members reordered"
+	}
+	return fmt.Sprintf("members %d -> %d: %s", len(old), len(new), strings.Join(parts, ", "))
 }

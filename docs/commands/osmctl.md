@@ -23,7 +23,7 @@ Practice on the sandbox first: `osmctl --server dev ...`
 
 ### SEE ALSO
 
-* [osmctl add](osmctl_add.md)	 - Create new nodes and ways
+* [osmctl add](osmctl_add.md)	 - Create new nodes, ways and relations
 * [osmctl apply](osmctl_apply.md)	 - Stage an osmChange file made by another tool
 * [osmctl auth](osmctl_auth.md)	 - Log in to OpenStreetMap and manage your token
 * [osmctl browse](osmctl_browse.md)	 - Open an element, changeset or note on the website
@@ -37,6 +37,7 @@ Practice on the sandbox first: `osmctl --server dev ...`
 * [osmctl get](osmctl_get.md)	 - Show nodes, ways and relations
 * [osmctl history](osmctl_history.md)	 - Show every version of an element
 * [osmctl map](osmctl_map.md)	 - Download all map data in a small area
+* [osmctl member](osmctl_member.md)	 - Add or remove members of a relation
 * [osmctl move](osmctl_move.md)	 - Move a node to a new location
 * [osmctl note](osmctl_note.md)	 - Report problems and resolve map notes
 * [osmctl push](osmctl_push.md)	 - Upload staged changes as one changeset
