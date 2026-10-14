@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/happyhackingspace/osmctl/internal/auth"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/stage"
 )
 
@@ -238,5 +239,110 @@ func TestAddWayFromGPX(t *testing.T) {
 	}
 	if _, _, err := run(t, memStore{}, "", "--server", f.URL, "add", "way", "--from-gpx", path, "--track", "2"); err == nil {
 		t.Error("a missing track should fail")
+	}
+}
+
+// splitOSM accepts two changes per changeset, assigns real ids, and can fail
+// one upload to test resuming.
+type splitOSM struct {
+	*httptest.Server
+	mu       sync.Mutex
+	next     int64
+	uploads  []string
+	comments []string
+	failOnce int
+}
+
+func newSplitOSM(t *testing.T) *splitOSM {
+	t.Helper()
+	f := &splitOSM{next: 1000}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/0.6/capabilities", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `<osm><api><changesets maximum_elements="2"/></api></osm>`)
+	})
+	mux.HandleFunc("GET /api/0.6/user/details", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `<osm><user id="42" display_name="hhs-mapper"/></osm>`)
+	})
+	mux.HandleFunc("PUT /api/0.6/changeset/create", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.comments = append(f.comments, string(b))
+		n := len(f.comments)
+		f.mu.Unlock()
+		fmt.Fprint(w, n)
+	})
+	mux.HandleFunc("POST /api/0.6/changeset/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.failOnce > 0 && len(f.uploads)+1 == f.failOnce {
+			f.failOnce = 0
+			http.Error(w, "server busy", http.StatusServiceUnavailable)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		f.uploads = append(f.uploads, string(b))
+		change, err := osm.ReadChange(strings.NewReader(string(b)))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var res strings.Builder
+		res.WriteString("<diffResult>")
+		for _, el := range change.Create.Elements() {
+			f.next++
+			fmt.Fprintf(&res, `<%s old_id="%d" new_id="%d" new_version="1"/>`, el.ElementID().Type, el.ElementID().Ref, f.next)
+		}
+		res.WriteString("</diffResult>")
+		_, _ = io.WriteString(w, res.String())
+	})
+	mux.HandleFunc("PUT /api/0.6/changeset/{id}/close", func(http.ResponseWriter, *http.Request) {})
+	f.Server = httptest.NewServer(mux)
+	t.Cleanup(f.Close)
+	return f
+}
+
+func TestPushSplitsAndResumes(t *testing.T) {
+	t.Setenv(stage.DirEnv, t.TempDir())
+	t.Setenv(auth.TokenEnv, "")
+	f := newSplitOSM(t)
+	f.failOnce = 2
+	store := memStore{f.URL: "test-token"}
+	srv := []string{"--server", f.URL}
+	for _, at := range []string{"1,1", "1,1.001", "1,1.002"} {
+		if _, _, err := run(t, store, "", append(srv, "add", "node", "--at", at)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := run(t, store, "", append(srv, "add", "way", "--nodes", "n-1,n-2,n-3", "highway=path")...); err != nil {
+		t.Fatal(err)
+	}
+
+	push := append(srv, "push", "-m", "Add a footpath along the stream", "--no-check", "--yes")
+	_, errOut, err := run(t, store, "", push...)
+	if err == nil || !strings.Contains(err.Error(), "part 2 of 2 failed") {
+		t.Fatalf("expected the second part to fail: %v\n%s", err, errOut)
+	}
+	if !strings.Contains(errOut, "split into 2 changesets") {
+		t.Errorf("the split was not announced:\n%s", errOut)
+	}
+	out, _, _ := run(t, store, "", append(srv, "status")...)
+	if !strings.Contains(out, "2 to create") {
+		t.Fatalf("after a failed part, only the rest should stay staged:\n%s", out)
+	}
+
+	if _, errOut, err = run(t, store, "", push...); err != nil {
+		t.Fatalf("resume failed: %v\n%s", err, errOut)
+	}
+	if len(f.uploads) != 2 {
+		t.Fatalf("uploads = %d, want 2", len(f.uploads))
+	}
+	if strings.Contains(f.uploads[1], `ref="-1"`) || strings.Contains(f.uploads[1], `ref="-2"`) {
+		t.Errorf("the second part still refers to placeholders of the first:\n%s", f.uploads[1])
+	}
+	if !strings.Contains(f.comments[0], "(part 1 of 2)") {
+		t.Errorf("comment lacks the part number: %s", f.comments[0])
+	}
+	if out, _, _ := run(t, store, "", append(srv, "status")...); !strings.Contains(out, "nothing staged") {
+		t.Errorf("stage not empty after the resumed push:\n%s", out)
 	}
 }

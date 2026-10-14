@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -86,6 +87,11 @@ Practice on the sandbox with --server dev before editing the real map.`,
 			if s.Len() >= bulkThreshold {
 				fmt.Fprintf(a.errOut, "\nThis is a large edit (%d changes). Automated and mass edits must be discussed with the community first:\n  https://wiki.openstreetmap.org/wiki/Automated_Edits_code_of_conduct\n", s.Len())
 			}
+			limit := c.ChangesetLimit(ctx)
+			parts := s.Parts(limit)
+			if parts > 1 {
+				fmt.Fprintf(a.errOut, "\nThe server accepts %d changes per changeset, so this upload is split into %d changesets.\n", limit, parts)
+			}
 			if !yes {
 				ok, err := a.confirm(fmt.Sprintf("\nUpload %d change(s) to %s as %s?", s.Len(), a.srv.Web, me.Name))
 				if err != nil {
@@ -109,21 +115,7 @@ Practice on the sandbox with --server dev before editing the real map.`,
 			}
 			tags = append(tags, more...)
 
-			id, res, err := upload(ctx, c, tags, s.Change())
-			if err != nil {
-				return err
-			}
-			s.Clear()
-			if err := s.Save(); err != nil {
-				return fmt.Errorf("pushed changeset %d but could not clear the stage: %w", id, err)
-			}
-			for _, e := range res.Entries {
-				if e.OldID < 0 {
-					fmt.Fprintf(a.errOut, "  %s/%d is now %s/%d\n", e.Type(), e.OldID, e.Type(), e.NewID)
-				}
-			}
-			_, err = fmt.Fprintf(a.out, "%s/changeset/%d\n", a.srv.Web, id)
-			return err
+			return a.uploadParts(ctx, c, s, tags, limit, parts)
 		},
 	}
 	f := cmd.Flags()
@@ -134,6 +126,46 @@ Practice on the sandbox with --server dev before editing the real map.`,
 	f.BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
 	f.BoolVar(&noCheck, "no-check", false, "skip the checks for mistakes (see osmctl check)")
 	return cmd
+}
+
+// uploadParts uploads the stage one changeset at a time. Each finished part
+// is removed from the stage and saved before the next starts, so an
+// interrupted push resumes where it stopped instead of uploading twice.
+func (a *app) uploadParts(ctx context.Context, c *api.Client, s *stage.Stage, tags osm.Tags, limit, parts int) error {
+	comment := tags.Find("comment")
+	for part := 1; !s.Empty(); part++ {
+		batch := s.NextBatch(limit)
+		partTags := slices.Clone(tags)
+		if parts > 1 {
+			for i := range partTags {
+				if partTags[i].Key == "comment" {
+					partTags[i].Value = fmt.Sprintf("%s (part %d of %d)", comment, part, parts)
+				}
+			}
+		}
+		id, res, err := upload(ctx, c, partTags, batch)
+		if err != nil {
+			if part > 1 {
+				return fmt.Errorf("part %d of %d failed; parts 1 to %d are on the map and the rest is still staged, so push again to continue: %w", part, parts, part-1, err)
+			}
+			return err
+		}
+		assigned := map[osm.ID]int64{}
+		for _, e := range res.Entries {
+			if e.OldID < 0 {
+				assigned[osm.ID{Type: osm.Type(e.Type()), Ref: e.OldID}] = e.NewID
+				fmt.Fprintf(a.errOut, "  %s/%d is now %s/%d\n", e.Type(), e.OldID, e.Type(), e.NewID)
+			}
+		}
+		s.Committed(batch, assigned)
+		if err := s.Save(); err != nil {
+			return fmt.Errorf("pushed changeset %d but could not update the stage; do not push again before checking `osmctl status`: %w", id, err)
+		}
+		if _, err := fmt.Fprintf(a.out, "%s/changeset/%d\n", a.srv.Web, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // upload opens a changeset, uploads and closes it. The changeset is closed
