@@ -3,6 +3,7 @@ package validate
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/happyhackingspace/osmctl/internal/osm"
@@ -42,6 +43,10 @@ func network(ctx context.Context, s *stage.Stage, src MapSource) []Issue {
 		if !connected(w, after) {
 			out = append(out, Issue{Warning, w.ElementID().String(), "disconnected-road",
 				"road is not connected to any other road; join it at a shared node (osmctl add node --on)"})
+		}
+		if other, ok := overlapping(w, after, coords); ok {
+			out = append(out, Issue{Warning, w.ElementID().String(), "duplicate-road",
+				fmt.Sprintf("runs along %s (%s) for most of its length; it may already be mapped", other.ElementID(), describe(other))})
 		}
 		for _, other := range after.Ways {
 			if other.ID == w.ID || !crossable(w, other) {
@@ -209,4 +214,60 @@ func intersect(p1, p2, q1, q2 [2]float64) ([2]float64, bool) {
 		return [2]float64{}, false
 	}
 	return [2]float64{p1[0] + t*rx, p1[1] + t*ry}, true
+}
+
+// overlapMeters is how close a node must be to another road to count as
+// running along it: about a lane and a half, above typical GPS error.
+const overlapMeters = 6.0
+
+// overlapping finds a road that most of w's nodes lie on, which means w is
+// probably a second copy of it, as happens when importing a GPS track of a
+// road that is already mapped.
+func overlapping(w *osm.Way, d *osm.Data, coords map[int64][2]float64) (*osm.Way, bool) {
+	if len(w.Nodes) < 3 {
+		return nil, false
+	}
+	for _, other := range d.Ways {
+		if other.ID == w.ID || !isRoad(other) {
+			continue
+		}
+		near := 0
+		for _, n := range w.Nodes {
+			p, ok := coords[n]
+			if ok && distanceToWay(p, other, coords) < overlapMeters {
+				near++
+			}
+		}
+		if near*2 > len(w.Nodes) {
+			return other, true
+		}
+	}
+	return nil, false
+}
+
+// distanceToWay is the distance in metres from p (lon,lat) to the nearest
+// segment of w, in a local plane around p.
+func distanceToWay(p [2]float64, w *osm.Way, coords map[int64][2]float64) float64 {
+	const r = 6371008.8
+	k := math.Cos(p[1] * math.Pi / 180)
+	xy := func(q [2]float64) (float64, float64) {
+		return (q[0] - p[0]) * math.Pi / 180 * r * k, (q[1] - p[1]) * math.Pi / 180 * r
+	}
+	best := math.Inf(1)
+	for i := 1; i < len(w.Nodes); i++ {
+		a, okA := coords[w.Nodes[i-1]]
+		b, okB := coords[w.Nodes[i]]
+		if !okA || !okB {
+			continue
+		}
+		ax, ay := xy(a)
+		bx, by := xy(b)
+		dx, dy := bx-ax, by-ay
+		t := 0.0
+		if l := dx*dx + dy*dy; l > 0 {
+			t = max(0, min(1, -(ax*dx+ay*dy)/l))
+		}
+		best = min(best, math.Hypot(ax+t*dx, ay+t*dy))
+	}
+	return best
 }

@@ -151,9 +151,15 @@ func (s *Stage) AddNode(lat, lon float64, tags osm.Tags) osm.ID {
 	return n.ElementID()
 }
 
+// MaxWayNodes is the API's limit on the nodes of one way.
+const MaxWayNodes = 2000
+
 func (s *Stage) AddWay(nodes []int64, tags osm.Tags) (osm.ID, error) {
 	if len(nodes) < 2 {
 		return osm.ID{}, errors.New("a way needs at least two nodes")
+	}
+	if len(nodes) > MaxWayNodes {
+		return osm.ID{}, fmt.Errorf("a way may have at most %d nodes, got %d", MaxWayNodes, len(nodes))
 	}
 	for _, n := range nodes {
 		if id := (osm.ID{Type: osm.TypeNode, Ref: n}); n < 0 && s.Create.Find(id) == nil {

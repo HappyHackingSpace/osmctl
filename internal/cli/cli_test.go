@@ -3,9 +3,12 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -208,5 +211,32 @@ func TestPushStopsOnCheckErrors(t *testing.T) {
 	out, _, err := run(t, store, "", append(srv, "check", "--offline")...)
 	if err == nil || !strings.Contains(out, "not part of any way") {
 		t.Errorf("check output:\n%s\nerr=%v", out, err)
+	}
+}
+
+func TestAddWayFromGPX(t *testing.T) {
+	t.Setenv(stage.DirEnv, t.TempDir())
+	f := newFakeOSM(t)
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString(`<gpx version="1.1"><trk><trkseg>`)
+	for i := 0; i <= 200; i++ {
+		jitter := 0.000012 * float64(i%2)
+		fmt.Fprintf(&b, `<trkpt lat="%f" lon="%f"/>`, 38+jitter, 40+float64(i)*0.00001)
+	}
+	b.WriteString(`<trkpt lat="38.001" lon="40.002"/></trkseg></trk></gpx>`)
+	path := filepath.Join(dir, "drive.gpx")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, err := run(t, memStore{}, "", "--server", f.URL, "add", "way", "--from-gpx", path, "highway=track")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut, "with 3 nodes from 202 GPS points") {
+		t.Errorf("unexpected result: %s", errOut)
+	}
+	if _, _, err := run(t, memStore{}, "", "--server", f.URL, "add", "way", "--from-gpx", path, "--track", "2"); err == nil {
+		t.Error("a missing track should fail")
 	}
 }
