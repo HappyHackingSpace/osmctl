@@ -123,6 +123,7 @@ Practice on the sandbox first: ` + "`osmctl --server dev ...`",
 	add("search", newQueryCmd(a), newFindCmd(a), newGeocodeCmd(a), newReverseCmd(a))
 	add("edit", newTagCmd(a), newAddCmd(a), newMoveCmd(a), newDeleteCmd(a), newApplyCmd(a), newStatusCmd(a), newDiffCmd(a), newResetCmd(a), newPushCmd(a))
 	add("contribute", newNoteCmd(a))
+	add("local", newDataCmd(a))
 	add("account", newAuthCmd(a))
 	return root
 }

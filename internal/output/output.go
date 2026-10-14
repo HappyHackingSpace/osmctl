@@ -61,7 +61,15 @@ func Data(w io.Writer, o *osm.OSM, f Format) error {
 	case JSON:
 		return WriteJSON(w, o)
 	case XML:
-		return WriteXML(w, o)
+		// JOSM and other editors reject an <osm> root without a version.
+		cp := *o
+		if cp.Version == "" {
+			cp.Version = "0.6"
+		}
+		if cp.Generator == "" {
+			cp.Generator = "osmctl"
+		}
+		return WriteXML(w, &cp)
 	case GeoJSON:
 		fc, err := osmgeojson.Convert(o, osmgeojson.NoMeta(true))
 		if err != nil {

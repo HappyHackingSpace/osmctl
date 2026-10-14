@@ -15,6 +15,7 @@ import (
 	"github.com/happyhackingspace/osmctl/internal/nominatim"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/overpass"
+	"github.com/happyhackingspace/osmctl/internal/tagfilter"
 )
 
 func (a *app) overpass() *overpass.Client {
@@ -114,13 +115,11 @@ Every filter must match:
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			q := overpass.FindQuery{Limit: limit, Timeout: timeout}
-			for _, arg := range args {
-				f, err := overpass.ParseFilter(arg)
-				if err != nil {
-					return err
-				}
-				q.Filters = append(q.Filters, f)
+			filters, err := tagfilter.ParseAll(args)
+			if err != nil {
+				return err
 			}
+			q.Filters = filters
 			for _, t := range types {
 				switch osm.Type(t) {
 				case osm.TypeNode, osm.TypeWay, osm.TypeRelation:

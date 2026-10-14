@@ -2,53 +2,12 @@ package overpass
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/paulmach/osm"
+
+	"github.com/happyhackingspace/osmctl/internal/tagfilter"
 )
-
-// Filter is one tag condition in the shorthand users type on the command line.
-type Filter struct {
-	Key, Op, Value string
-}
-
-var filterRe = regexp.MustCompile(`^(!?)([^=!~]+)(?:(=|!=|~|!~)(.*))?$`)
-
-// ParseFilter accepts key, !key, key=value, key!=value, key~regex and key!~regex.
-func ParseFilter(s string) (Filter, error) {
-	m := filterRe.FindStringSubmatch(strings.TrimSpace(s))
-	if m == nil || strings.TrimSpace(m[2]) == "" {
-		return Filter{}, fmt.Errorf("invalid tag filter %q (expected key, !key, key=value, key!=value, key~regex)", s)
-	}
-	f := Filter{Key: strings.TrimSpace(m[2]), Op: m[3], Value: m[4]}
-	if m[1] == "!" {
-		if f.Op != "" {
-			return Filter{}, fmt.Errorf("invalid tag filter %q: use key!=value instead of !key=value", s)
-		}
-		f.Op = "!"
-	}
-	if (f.Op == "=" || f.Op == "!=" || f.Op == "~" || f.Op == "!~") && f.Value == "" {
-		return Filter{}, fmt.Errorf("invalid tag filter %q: missing value", s)
-	}
-	return f, nil
-}
-
-func (f Filter) String() string {
-	k := quote(f.Key)
-	switch f.Op {
-	case "":
-		return "[" + k + "]"
-	case "!":
-		return "[!" + k + "]"
-	default:
-		return "[" + k + f.Op + quote(f.Value) + "]"
-	}
-}
-
-func quote(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
-}
 
 // Scope limits where Find looks. Exactly one field should be set.
 type Scope struct {
@@ -76,7 +35,7 @@ func AreaIDFor(id osm.FeatureID) (int64, error) {
 
 type FindQuery struct {
 	Types   []osm.Type
-	Filters []Filter
+	Filters []tagfilter.Filter
 	Scope   Scope
 	Limit   int
 	Timeout int
@@ -111,7 +70,7 @@ func (q FindQuery) Build() (string, error) {
 	}
 	var filters strings.Builder
 	for _, f := range q.Filters {
-		filters.WriteString(f.String())
+		filters.WriteString(f.QL())
 	}
 
 	timeout := q.Timeout

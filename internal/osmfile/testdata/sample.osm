@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="osmctl test">
+  <node id="1" lat="37.910" lon="40.230" version="1" timestamp="2020-01-01T00:00:00Z">
+    <tag k="amenity" v="cafe"/>
+    <tag k="name" v="Kafe Amed"/>
+  </node>
+  <node id="2" lat="37.911" lon="40.231" version="1" timestamp="2021-01-01T00:00:00Z"/>
+  <node id="3" lat="37.950" lon="40.300" version="1" timestamp="2022-01-01T00:00:00Z">
+    <tag k="barrier" v="gate"/>
+  </node>
+  <node id="4" lat="38.500" lon="41.000" version="2" timestamp="2023-06-01T00:00:00Z">
+    <tag k="amenity" v="cafe"/>
+  </node>
+  <way id="10" version="1" timestamp="2024-01-01T00:00:00Z">
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <tag k="highway" v="footway"/>
+  </way>
+  <way id="11" version="1" timestamp="2024-01-01T00:00:00Z">
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <tag k="highway" v="track"/>
+  </way>
+  <relation id="20" version="1" timestamp="2025-01-01T00:00:00Z">
+    <member type="way" ref="10" role=""/>
+    <tag k="type" v="route"/>
+    <tag k="route" v="hiking"/>
+  </relation>
+</osm>
