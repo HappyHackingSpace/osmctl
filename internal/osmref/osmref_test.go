@@ -4,13 +4,13 @@ import "testing"
 
 func TestParse(t *testing.T) {
 	valid := map[string]string{
-		"node/123":    "node/123",
-		"n123":        "node/123",
-		"W42":         "way/42",
-		"r7":          "relation/7",
-		"relation 7":  "relation/7",
-		" way/9 ":     "way/9",
-		"https://www.openstreetmap.org/way/42":                  "way/42",
+		"node/123":                             "node/123",
+		"n123":                                 "node/123",
+		"W42":                                  "way/42",
+		"r7":                                   "relation/7",
+		"relation 7":                           "relation/7",
+		" way/9 ":                              "way/9",
+		"https://www.openstreetmap.org/way/42": "way/42",
 		"https://www.openstreetmap.org/node/5#map=19/37.9/40.2": "node/5",
 	}
 	for in, want := range valid {
