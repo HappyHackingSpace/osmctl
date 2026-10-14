@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/api"
@@ -22,12 +21,12 @@ func newChangesetCmd(a *app) *cobra.Command {
 	return cmd
 }
 
-func parseChangesetID(s string) (osm.ChangesetID, error) {
+func parseChangesetID(s string) (int64, error) {
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || n <= 0 {
 		return 0, fmt.Errorf("changeset id must be a positive number: %q", s)
 	}
-	return osm.ChangesetID(n), nil
+	return n, nil
 }
 
 func newChangesetViewCmd(a *app) *cobra.Command {
@@ -81,7 +80,7 @@ func newChangesetListCmd(a *app) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				q.User = strconv.FormatInt(int64(me.ID), 10)
+				q.User = strconv.FormatInt(me.ID, 10)
 			}
 			cs, err := c.Changesets(cmd.Context(), q)
 			if err != nil {

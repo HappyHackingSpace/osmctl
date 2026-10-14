@@ -154,7 +154,7 @@ func TestEditAndPush(t *testing.T) {
 			t.Errorf("changeset tags missing %s: %s", want, f.comment)
 		}
 	}
-	if !strings.Contains(f.uploaded, `<node id="1" changeset="77" version="3"`) || strings.Contains(f.uploaded, `k="amenity" v="cafe"`) {
+	if !strings.Contains(f.uploaded, `<node id="1" version="3" changeset="77"`) || strings.Contains(f.uploaded, `k="amenity" v="cafe"`) {
 		t.Errorf("unexpected upload:\n%s", f.uploaded)
 	}
 	if out, _, _ := run(t, store, "", append(srv, "status")...); !strings.Contains(out, "nothing staged") {

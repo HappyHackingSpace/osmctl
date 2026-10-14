@@ -8,8 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/paulmach/osm"
-
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/tagfilter"
 )
 
@@ -17,8 +16,11 @@ const sample = "testdata/sample.osm"
 
 var ctx = context.Background()
 
-func nodeIDs(o *osm.OSM) []osm.NodeID {
-	ids := o.Nodes.IDs()
+func nodeIDs(d *osm.Data) []int64 {
+	var ids []int64
+	for _, n := range d.Nodes {
+		ids = append(ids, n.ID)
+	}
 	slices.Sort(ids)
 	return ids
 }
@@ -46,9 +48,9 @@ func TestExtractByTagIncludesWayGeometry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(o.Ways) != 1 || o.Ways[0].ID != 10 {
-		t.Fatalf("ways = %v", o.Ways.IDs())
+		t.Fatalf("ways = %v", o.Ways)
 	}
-	if got := nodeIDs(o); !slices.Equal(got, []osm.NodeID{2, 3}) {
+	if got := nodeIDs(o); !slices.Equal(got, []int64{2, 3}) {
 		t.Errorf("geometry nodes = %v, want [2 3]", got)
 	}
 	for _, n := range o.Nodes {
@@ -64,7 +66,7 @@ func TestExtractNodesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := nodeIDs(o); !slices.Equal(got, []osm.NodeID{1, 4}) || len(o.Ways)+len(o.Relations) != 0 {
+	if got := nodeIDs(o); !slices.Equal(got, []int64{1, 4}) || len(o.Ways)+len(o.Relations) != 0 {
 		t.Errorf("nodes=%v ways=%d relations=%d", got, len(o.Ways), len(o.Relations))
 	}
 }
@@ -77,11 +79,11 @@ func TestExtractBBox(t *testing.T) {
 	}
 	// Nodes 1 and 2 are inside; way 10 crosses the edge, so node 3 comes along
 	// with its tags; way 11 and node 4 are entirely outside.
-	if got := nodeIDs(o); !slices.Equal(got, []osm.NodeID{1, 2, 3}) {
+	if got := nodeIDs(o); !slices.Equal(got, []int64{1, 2, 3}) {
 		t.Errorf("nodes = %v", got)
 	}
 	if len(o.Ways) != 1 || len(o.Relations) != 1 {
-		t.Errorf("ways=%v relations=%d", o.Ways.IDs(), len(o.Relations))
+		t.Errorf("ways=%v relations=%d", o.Ways, len(o.Relations))
 	}
 	for _, n := range o.Nodes {
 		if n.ID == 3 && n.Tags.Find("barrier") != "gate" {

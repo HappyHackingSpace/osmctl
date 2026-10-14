@@ -5,117 +5,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paulmach/osm"
-
-	"github.com/happyhackingspace/osmctl/internal/osmref"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
-
-func find(o *osm.OSM, id osm.FeatureID) osm.Element {
-	if o == nil {
-		return nil
-	}
-	switch id.Type() {
-	case osm.TypeNode:
-		for _, n := range o.Nodes {
-			if n.ID == id.NodeID() {
-				return n
-			}
-		}
-	case osm.TypeWay:
-		for _, w := range o.Ways {
-			if w.ID == id.WayID() {
-				return w
-			}
-		}
-	case osm.TypeRelation:
-		for _, r := range o.Relations {
-			if r.ID == id.RelationID() {
-				return r
-			}
-		}
-	}
-	return nil
-}
-
-func with(o *osm.OSM, el osm.Element) *osm.OSM {
-	if o = without(o, osmref.Of(el)); o == nil {
-		o = &osm.OSM{}
-	}
-	switch v := el.(type) {
-	case *osm.Node:
-		o.Nodes = append(o.Nodes, v)
-	case *osm.Way:
-		o.Ways = append(o.Ways, v)
-	case *osm.Relation:
-		o.Relations = append(o.Relations, v)
-	}
-	return o
-}
-
-func without(o *osm.OSM, id osm.FeatureID) *osm.OSM {
-	if o == nil {
-		return nil
-	}
-	switch id.Type() {
-	case osm.TypeNode:
-		o.Nodes = slices.DeleteFunc(o.Nodes, func(n *osm.Node) bool { return n.ID == id.NodeID() })
-	case osm.TypeWay:
-		o.Ways = slices.DeleteFunc(o.Ways, func(w *osm.Way) bool { return w.ID == id.WayID() })
-	case osm.TypeRelation:
-		o.Relations = slices.DeleteFunc(o.Relations, func(r *osm.Relation) bool { return r.ID == id.RelationID() })
-	}
-	if count(o) == 0 {
-		return nil
-	}
-	return o
-}
-
-func clone(el osm.Element) osm.Element {
-	switch v := el.(type) {
-	case *osm.Node:
-		c := *v
-		c.Tags = slices.Clone(v.Tags)
-		return &c
-	case *osm.Way:
-		c := *v
-		c.Tags = slices.Clone(v.Tags)
-		c.Nodes = slices.Clone(v.Nodes)
-		return &c
-	case *osm.Relation:
-		c := *v
-		c.Tags = slices.Clone(v.Tags)
-		c.Members = slices.Clone(v.Members)
-		return &c
-	}
-	panic(fmt.Sprintf("stage: unexpected element %T", el))
-}
-
-func tagsOf(el osm.Element) osm.Tags {
-	switch v := el.(type) {
-	case *osm.Node:
-		return v.Tags
-	case *osm.Way:
-		return v.Tags
-	case *osm.Relation:
-		return v.Tags
-	}
-	return nil
-}
-
-func setTags(el osm.Element, ts osm.Tags) {
-	switch v := el.(type) {
-	case *osm.Node:
-		v.Tags = ts
-	case *osm.Way:
-		v.Tags = ts
-	case *osm.Relation:
-		v.Tags = ts
-	}
-}
 
 // equal compares what an edit can change: tags, location, nodes and members.
 func equal(a, b osm.Element) bool {
-	if !maps(tagsOf(a), tagsOf(b)) {
+	if !sameTags(osm.TagsOf(a), osm.TagsOf(b)) {
 		return false
 	}
 	switch x := a.(type) {
@@ -123,17 +18,14 @@ func equal(a, b osm.Element) bool {
 		y := b.(*osm.Node)
 		return x.Lat == y.Lat && x.Lon == y.Lon
 	case *osm.Way:
-		return slices.Equal(x.Nodes.NodeIDs(), b.(*osm.Way).Nodes.NodeIDs())
+		return slices.Equal(x.Nodes, b.(*osm.Way).Nodes)
 	case *osm.Relation:
-		y := b.(*osm.Relation)
-		return slices.EqualFunc(x.Members, y.Members, func(m, n osm.Member) bool {
-			return m.Type == n.Type && m.Ref == n.Ref && m.Role == n.Role
-		})
+		return slices.Equal(x.Members, b.(*osm.Relation).Members)
 	}
 	return false
 }
 
-func maps(a, b osm.Tags) bool {
+func sameTags(a, b osm.Tags) bool {
 	if len(a) != len(b) {
 		return false
 	}

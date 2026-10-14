@@ -9,10 +9,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/api"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/stage"
 )
@@ -123,7 +123,7 @@ Practice on the sandbox with --server dev before editing the real map.`,
 
 // upload opens a changeset, uploads and closes it. The changeset is closed
 // even when the upload fails, so no empty changeset lingers open for an hour.
-func upload(ctx context.Context, c *api.Client, tags osm.Tags, change *osm.Change) (osm.ChangesetID, *api.DiffResult, error) {
+func upload(ctx context.Context, c *api.Client, tags osm.Tags, change *osm.Change) (int64, *api.DiffResult, error) {
 	id, err := c.CreateChangeset(ctx, tags)
 	if err != nil {
 		return 0, nil, fmt.Errorf("open changeset: %w", err)

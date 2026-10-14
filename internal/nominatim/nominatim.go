@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Client struct {
@@ -32,10 +32,11 @@ type Place struct {
 	Address     map[string]string `json:"address,omitempty"`
 }
 
-// FeatureID returns the OSM element behind the place, if it has one.
-func (p Place) FeatureID() (osm.FeatureID, bool) {
-	id, err := osm.Type(p.OSMType).FeatureID(p.OSMID)
-	return id, err == nil && p.OSMID > 0
+// ElementID returns the OSM element behind the place, if it has one.
+func (p Place) ElementID() (osm.ID, bool) {
+	t := osm.Type(p.OSMType)
+	ok := p.OSMID > 0 && (t == osm.TypeNode || t == osm.TypeWay || t == osm.TypeRelation)
+	return osm.ID{Type: t, Ref: p.OSMID}, ok
 }
 
 type SearchOptions struct {

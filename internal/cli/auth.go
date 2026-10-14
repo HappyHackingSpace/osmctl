@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cli/browser"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/auth"
+	"github.com/happyhackingspace/osmctl/internal/browser"
 )
 
 func newAuthCmd(a *app) *cobra.Command {
@@ -53,7 +53,7 @@ instead, or --with-token to read an existing token from standard input.`,
 				}
 			} else {
 				token, err = auth.Login(cmd.Context(), a.srv, auth.LoginOptions{
-					Manual: manual, Open: browser.OpenURL, In: a.in, Out: a.errOut, HTTP: a.http(),
+					Manual: manual, Open: browser.Open, In: a.in, Out: a.errOut, HTTP: a.http(),
 				})
 				if err != nil {
 					return err

@@ -2,9 +2,7 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -12,25 +10,18 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/paulmach/osm"
-	"github.com/paulmach/osm/osmapi"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Client struct {
 	base string
 	http *http.Client
-	ds   *osmapi.Datasource
 }
 
 // New expects an http.Client that already sets User-Agent and, for writes,
-// authentication. Reads reuse paulmach/osm so only the write side lives here.
+// authentication.
 func New(baseURL string, hc *http.Client) *Client {
-	base := strings.TrimRight(baseURL, "/")
-	return &Client{
-		base: base,
-		http: hc,
-		ds:   &osmapi.Datasource{BaseURL: base, Client: hc},
-	}
+	return &Client{base: strings.TrimRight(baseURL, "/"), http: hc}
 }
 
 // Error carries the plain-text reason the API gives, which is usually the only
@@ -50,26 +41,18 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s %s: %d %s", e.Method, e.URL, e.Status, msg)
 }
 
-func IsNotFound(err error) bool {
+func hasStatus(err error, status int) bool {
 	var apiErr *Error
-	if errors.As(err, &apiErr) {
-		return apiErr.Status == http.StatusNotFound
-	}
-	var nf *osmapi.NotFoundError
-	return errors.As(err, &nf)
+	return errors.As(err, &apiErr) && apiErr.Status == status
 }
+
+func IsNotFound(err error) bool { return hasStatus(err, http.StatusNotFound) }
 
 // IsGone reports a deleted element; its history is still available.
-func IsGone(err error) bool {
-	var apiErr *Error
-	if errors.As(err, &apiErr) {
-		return apiErr.Status == http.StatusGone
-	}
-	var g *osmapi.GoneError
-	return errors.As(err, &g)
-}
+func IsGone(err error) bool { return hasStatus(err, http.StatusGone) }
 
-func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
+// do sends a request. The response body is passed to read, when given.
+func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string, read func(io.Reader) error) error {
 	u := c.base + path
 	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
@@ -88,126 +71,70 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &Error{Status: resp.StatusCode, Method: method, URL: u, Message: strings.TrimSpace(string(msg))}
 	}
-
-	switch v := out.(type) {
-	case nil:
+	if read == nil {
 		_, err = io.Copy(io.Discard, resp.Body)
-	case *string:
-		var b []byte
-		b, err = io.ReadAll(resp.Body)
-		*v = strings.TrimSpace(string(b))
-	default:
-		err = xml.NewDecoder(resp.Body).Decode(out)
-	}
-	return err
-}
-
-func (c *Client) get(ctx context.Context, path string, out any) error {
-	return c.do(ctx, http.MethodGet, path, nil, "", out)
-}
-
-func (c *Client) postForm(ctx context.Context, path string, form url.Values, out any) error {
-	return c.do(ctx, http.MethodPost, path, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded", out)
-}
-
-func (c *Client) sendXML(ctx context.Context, method, path string, v any, out any) error {
-	b, err := xml.Marshal(v)
-	if err != nil {
 		return err
 	}
-	return c.do(ctx, method, path, bytes.NewReader(b), "text/xml; charset=utf-8", out)
+	return read(resp.Body)
 }
+
+func (c *Client) getData(ctx context.Context, path string) (*osm.Data, error) {
+	var d *osm.Data
+	err := c.do(ctx, http.MethodGet, path, nil, "", func(r io.Reader) (err error) {
+		d, err = osm.ReadXML(r)
+		return err
+	})
+	return d, err
+}
+
+func (c *Client) postForm(ctx context.Context, path string, form url.Values, read func(io.Reader) error) error {
+	return c.do(ctx, http.MethodPost, path, strings.NewReader(form.Encode()), "application/x-www-form-urlencoded", read)
+}
+
+func elementPath(id osm.ID) string { return fmt.Sprintf("/%s/%d", id.Type, id.Ref) }
 
 // Element fetches the current version of an element. With full, ways and
 // relations come back with every node (and member) needed to draw them.
-func (c *Client) Element(ctx context.Context, id osm.FeatureID, full bool) (*osm.OSM, error) {
-	o := &osm.OSM{}
-	switch id.Type() {
-	case osm.TypeNode:
-		n, err := c.ds.Node(ctx, id.NodeID())
-		if err != nil {
-			return nil, err
-		}
-		o.Append(n)
-	case osm.TypeWay:
-		if full {
-			return c.ds.WayFull(ctx, id.WayID())
-		}
-		w, err := c.ds.Way(ctx, id.WayID())
-		if err != nil {
-			return nil, err
-		}
-		o.Append(w)
-	case osm.TypeRelation:
-		if full {
-			return c.ds.RelationFull(ctx, id.RelationID())
-		}
-		r, err := c.ds.Relation(ctx, id.RelationID())
-		if err != nil {
-			return nil, err
-		}
-		o.Append(r)
-	default:
-		return nil, fmt.Errorf("unsupported element type %s", id.Type())
+func (c *Client) Element(ctx context.Context, id osm.ID, full bool) (*osm.Data, error) {
+	path := elementPath(id)
+	if full && id.Type != osm.TypeNode {
+		path += "/full"
 	}
-	return o, nil
+	return c.getData(ctx, path)
 }
 
-func (c *Client) ElementVersion(ctx context.Context, id osm.FeatureID, v int) (*osm.OSM, error) {
-	o := &osm.OSM{}
-	var (
-		obj osm.Object
-		err error
-	)
-	switch id.Type() {
-	case osm.TypeNode:
-		obj, err = c.ds.NodeVersion(ctx, id.NodeID(), v)
-	case osm.TypeWay:
-		obj, err = c.ds.WayVersion(ctx, id.WayID(), v)
-	case osm.TypeRelation:
-		obj, err = c.ds.RelationVersion(ctx, id.RelationID(), v)
-	default:
-		return nil, fmt.Errorf("unsupported element type %s", id.Type())
-	}
-	if err != nil {
-		return nil, err
-	}
-	o.Append(obj)
-	return o, nil
+func (c *Client) ElementVersion(ctx context.Context, id osm.ID, version int) (*osm.Data, error) {
+	return c.getData(ctx, fmt.Sprintf("%s/%d", elementPath(id), version))
 }
 
-func (c *Client) History(ctx context.Context, id osm.FeatureID) (*osm.OSM, error) {
-	o := &osm.OSM{}
-	var err error
-	switch id.Type() {
-	case osm.TypeNode:
-		o.Nodes, err = c.ds.NodeHistory(ctx, id.NodeID())
-	case osm.TypeWay:
-		o.Ways, err = c.ds.WayHistory(ctx, id.WayID())
-	case osm.TypeRelation:
-		o.Relations, err = c.ds.RelationHistory(ctx, id.RelationID())
-	default:
-		err = fmt.Errorf("unsupported element type %s", id.Type())
-	}
-	return o, err
+func (c *Client) History(ctx context.Context, id osm.ID) (*osm.Data, error) {
+	return c.getData(ctx, elementPath(id)+"/history")
 }
 
-func (c *Client) Map(ctx context.Context, b *osm.Bounds) (*osm.OSM, error) {
-	return c.ds.Map(ctx, b)
+func (c *Client) Map(ctx context.Context, b *osm.Bounds) (*osm.Data, error) {
+	return c.getData(ctx, "/map?bbox="+bboxParam(b))
 }
 
-func (c *Client) User(ctx context.Context, id osm.UserID) (*osm.User, error) {
-	return c.ds.User(ctx, id)
+func (c *Client) User(ctx context.Context, id int64) (*osm.User, error) {
+	return c.oneUser(ctx, fmt.Sprintf("/user/%d", id))
 }
 
 // Me returns the authenticated user.
 func (c *Client) Me(ctx context.Context) (*osm.User, error) {
-	var o osm.OSM
-	if err := c.get(ctx, "/user/details", &o); err != nil {
+	return c.oneUser(ctx, "/user/details")
+}
+
+func (c *Client) oneUser(ctx context.Context, path string) (*osm.User, error) {
+	d, err := c.getData(ctx, path)
+	if err != nil {
 		return nil, err
 	}
-	if len(o.Users) == 0 {
-		return nil, errors.New("user details response contained no user")
+	if len(d.Users) == 0 {
+		return nil, fmt.Errorf("GET %s: response contained no user", path)
 	}
-	return o.Users[0], nil
+	return d.Users[0], nil
+}
+
+func bboxParam(b *osm.Bounds) string {
+	return fmt.Sprintf("%s,%s,%s,%s", osm.FormatFloat(b.MinLon), osm.FormatFloat(b.MinLat), osm.FormatFloat(b.MaxLon), osm.FormatFloat(b.MaxLat))
 }

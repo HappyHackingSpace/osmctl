@@ -8,12 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
-	"github.com/happyhackingspace/osmctl/internal/api"
 	"github.com/happyhackingspace/osmctl/internal/geo"
-	"github.com/happyhackingspace/osmctl/internal/osmref"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/stage"
 )
@@ -50,7 +48,7 @@ Quote values with spaces. Nothing is uploaded until ` + "`osmctl push`" + `.`,
   osmctl tag w42 name:ku="Kela Amedê" fixme-`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := osmref.Parse(args[0])
+			id, err := osm.ParseID(args[0])
 			if err != nil {
 				return err
 			}
@@ -106,7 +104,7 @@ that you can use in later commands; the server assigns real ids on push.`,
   osmctl add node --at 37.92,40.24
   osmctl add way --nodes n-1,n-2,n123456 highway=footway`,
 		RunE: func(_ *cobra.Command, args []string) error {
-			ids := make([]osm.NodeID, 0, len(nodes)+1)
+			ids := make([]int64, 0, len(nodes)+1)
 			for _, ref := range nodes {
 				id, err := parseNodeRef(ref)
 				if err != nil {
@@ -135,18 +133,18 @@ that you can use in later commands; the server assigns real ids on push.`,
 	return cmd
 }
 
-func parseNodeRef(s string) (osm.NodeID, error) {
+func parseNodeRef(s string) (int64, error) {
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil && n != 0 {
-		return osm.NodeID(n), nil
+		return n, nil
 	}
-	id, err := osmref.Parse(s)
+	id, err := osm.ParseID(s)
 	if err != nil {
 		return 0, err
 	}
-	if id.Type() != osm.TypeNode {
+	if id.Type != osm.TypeNode {
 		return 0, fmt.Errorf("%s is not a node", id)
 	}
-	return id.NodeID(), nil
+	return id.Ref, nil
 }
 
 func newMoveCmd(a *app) *cobra.Command {
@@ -157,7 +155,7 @@ func newMoveCmd(a *app) *cobra.Command {
 		Example: "  osmctl move node/2187164523 --to 37.91452,40.23071",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := osmref.Parse(args[0])
+			id, err := osm.ParseID(args[0])
 			if err != nil {
 				return err
 			}
@@ -185,9 +183,9 @@ those first, in the same push.`,
 		Example: "  osmctl delete node/2187164523\n  osmctl delete w42 n100 n101",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ids := make([]osm.FeatureID, 0, len(args))
+			ids := make([]osm.ID, 0, len(args))
 			for _, arg := range args {
-				id, err := osmref.Parse(arg)
+				id, err := osm.ParseID(arg)
 				if err != nil {
 					return err
 				}
@@ -271,7 +269,7 @@ changed (~), nodes moved, elements created and deleted.
 				return err
 			}
 			if a.format == output.XML {
-				b, err := api.EncodeChange(s.Change())
+				b, err := osm.EncodeUpload(s.Change(), 0)
 				if err != nil {
 					return err
 				}
@@ -307,7 +305,7 @@ func newResetCmd(a *app) *cobra.Command {
 					return "Unstaged everything", nil
 				}
 				for _, arg := range args {
-					id, err := osmref.Parse(arg)
+					id, err := osm.ParseID(arg)
 					if err != nil {
 						return "", err
 					}

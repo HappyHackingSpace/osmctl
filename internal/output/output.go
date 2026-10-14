@@ -6,13 +6,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/paulmach/osm"
-	"github.com/paulmach/osm/osmgeojson"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Format string
@@ -56,100 +54,77 @@ func WriteXML(w io.Writer, v any) error {
 }
 
 // Data renders map data: elements, histories, query and map results.
-func Data(w io.Writer, o *osm.OSM, f Format) error {
+func Data(w io.Writer, d *osm.Data, f Format) error {
 	switch f {
 	case JSON:
-		return WriteJSON(w, o)
+		return WriteJSON(w, d)
 	case XML:
-		// JOSM and other editors reject an <osm> root without a version.
-		cp := *o
-		if cp.Version == "" {
-			cp.Version = "0.6"
-		}
-		if cp.Generator == "" {
-			cp.Generator = "osmctl"
-		}
-		return WriteXML(w, &cp)
+		return osm.WriteXML(w, d)
 	case GeoJSON:
-		fc, err := osmgeojson.Convert(o, osmgeojson.NoMeta(true))
-		if err != nil {
-			return err
-		}
-		return WriteJSON(w, fc)
+		return WriteJSON(w, osm.GeoJSON(d))
 	default:
-		return dataText(w, o)
+		return dataText(w, d)
 	}
 }
 
-func dataText(w io.Writer, o *osm.OSM) error {
+func dataText(w io.Writer, d *osm.Data) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	first := true
-	block := func() {
-		if !first {
+	els := d.Elements()
+	for i, el := range els {
+		if i > 0 {
 			fmt.Fprintln(tw)
 		}
-		first = false
-	}
-	for _, n := range o.Nodes {
-		block()
-		header(tw, n.FeatureID(), n.Version, n.Timestamp, n.User, n.ChangesetID, n.Visible)
-		fmt.Fprintf(tw, "  location\t%.7f, %.7f\n", n.Lat, n.Lon)
-		tags(tw, n.Tags)
-	}
-	for _, way := range o.Ways {
-		block()
-		header(tw, way.FeatureID(), way.Version, way.Timestamp, way.User, way.ChangesetID, way.Visible)
-		fmt.Fprintf(tw, "  nodes\t%d %s\n", len(way.Nodes), refs(way.Nodes.NodeIDs()))
-		tags(tw, way.Tags)
-	}
-	for _, r := range o.Relations {
-		block()
-		header(tw, r.FeatureID(), r.Version, r.Timestamp, r.User, r.ChangesetID, r.Visible)
-		fmt.Fprintf(tw, "  members\t%d\n", len(r.Members))
-		for _, m := range r.Members {
-			role := m.Role
-			if role == "" {
-				role = "-"
+		header(tw, el.ElementID(), osm.MetaOf(el))
+		switch v := el.(type) {
+		case *osm.Node:
+			fmt.Fprintf(tw, "  location\t%.7f, %.7f\n", v.Lat, v.Lon)
+		case *osm.Way:
+			fmt.Fprintf(tw, "  nodes\t%d %s\n", len(v.Nodes), refs(v.Nodes))
+		case *osm.Relation:
+			fmt.Fprintf(tw, "  members\t%d\n", len(v.Members))
+			for _, m := range v.Members {
+				role := m.Role
+				if role == "" {
+					role = "-"
+				}
+				fmt.Fprintf(tw, "    %s\t%s\n", m.ElementID(), role)
 			}
-			fmt.Fprintf(tw, "    %s/%d\t%s\n", m.Type, m.Ref, role)
 		}
-		tags(tw, r.Tags)
+		tags(tw, osm.TagsOf(el))
 	}
-	if first {
+	if len(els) == 0 {
 		fmt.Fprintln(tw, "no elements")
 	}
 	return tw.Flush()
 }
 
-func header(w io.Writer, id osm.FeatureID, version int, ts time.Time, user string, cs osm.ChangesetID, visible bool) {
+func header(w io.Writer, id osm.ID, m *osm.Meta) {
 	line := id.String()
-	if version > 0 {
-		line += fmt.Sprintf("  v%d", version)
+	if m.Version > 0 {
+		line += fmt.Sprintf("  v%d", m.Version)
 	}
-	if !ts.IsZero() {
-		line += "  " + ts.UTC().Format("2006-01-02 15:04")
+	if !m.Timestamp.IsZero() {
+		line += "  " + m.Timestamp.UTC().Format("2006-01-02 15:04")
 	}
-	if user != "" {
-		line += "  by " + user
+	if m.User != "" {
+		line += "  by " + m.User
 	}
-	if cs > 0 {
-		line += fmt.Sprintf("  (changeset %d)", cs)
+	if m.Changeset > 0 {
+		line += fmt.Sprintf("  (changeset %d)", m.Changeset)
 	}
-	if version > 0 && !visible {
+	if !m.Visible {
 		line += "  [deleted]"
 	}
 	fmt.Fprintln(w, line)
 }
 
 func tags(w io.Writer, ts osm.Tags) {
-	sorted := append(osm.Tags(nil), ts...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Key < sorted[j].Key })
-	for _, t := range sorted {
+	for _, t := range ts.Sorted() {
 		fmt.Fprintf(w, "  %s\t%s\n", t.Key, t.Value)
 	}
 }
 
-func refs(ids []osm.NodeID) string {
+func refs(ids []int64) string {
 	const show = 6
 	parts := make([]string, 0, show+1)
 	for i, id := range ids {
@@ -160,4 +135,19 @@ func refs(ids []osm.NodeID) string {
 		parts = append(parts, fmt.Sprintf("n%d", id))
 	}
 	return "(" + strings.Join(parts, " ") + ")"
+}
+
+func date(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.UTC().Format("2006-01-02")
+}
+
+func oneLine(s string, limit int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > limit {
+		return string(r[:limit-1]) + "…"
+	}
+	return s
 }

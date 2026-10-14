@@ -2,9 +2,8 @@
 package overpass
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Client struct {
@@ -29,7 +28,7 @@ const attempts = 3
 
 // Result is either parsed map data or, for outputs such as [out:csv], the raw body.
 type Result struct {
-	Data *osm.OSM
+	Data *osm.Data
 	Raw  []byte
 }
 
@@ -79,36 +78,23 @@ func (c *Client) do(ctx context.Context, ql string) (*Result, error) {
 	ct, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	switch ct {
 	case "application/json":
-		var o osm.OSM
-		if err := json.Unmarshal(body, &o); err != nil {
-			return nil, fmt.Errorf("decode overpass json: %w", err)
+		d, remark, err := osm.ReadJSON(bytes.NewReader(body))
+		if err != nil {
+			return nil, err
 		}
-		if remark := remarkOf(body); remark != "" {
+		if strings.Contains(remark, "error") {
 			return nil, fmt.Errorf("overpass: %s", remark)
 		}
-		return &Result{Data: &o}, nil
+		return &Result{Data: d}, nil
 	case "application/osm3s+xml", "application/xml", "text/xml":
-		var o osm.OSM
-		if err := xml.Unmarshal(body, &o); err != nil {
-			return nil, fmt.Errorf("decode overpass xml: %w", err)
+		d, err := osm.ReadXML(bytes.NewReader(body))
+		if err != nil {
+			return nil, err
 		}
-		return &Result{Data: &o}, nil
+		return &Result{Data: d}, nil
 	default:
 		return &Result{Raw: body}, nil
 	}
-}
-
-// remarkOf surfaces runtime errors (timeouts, memory limits) that Overpass
-// reports inside a 200 response instead of as an HTTP error.
-func remarkOf(body []byte) string {
-	var r struct {
-		Remark string `json:"remark"`
-	}
-	_ = json.Unmarshal(body, &r)
-	if strings.Contains(r.Remark, "error") {
-		return r.Remark
-	}
-	return ""
 }
 
 type statusErr struct {

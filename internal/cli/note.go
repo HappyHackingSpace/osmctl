@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/api"
 	"github.com/happyhackingspace/osmctl/internal/auth"
 	"github.com/happyhackingspace/osmctl/internal/geo"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 )
 
@@ -31,12 +31,12 @@ editing the map directly. Mappers then fix the map and close the note.`,
 	return cmd
 }
 
-func parseNoteID(s string) (osm.NoteID, error) {
+func parseNoteID(s string) (int64, error) {
 	n, err := strconv.ParseInt(strings.TrimPrefix(s, "note/"), 10, 64)
 	if err != nil || n <= 0 {
 		return 0, fmt.Errorf("note id must be a positive number: %q", s)
 	}
-	return osm.NoteID(n), nil
+	return n, nil
 }
 
 func newNoteListCmd(a *app) *cobra.Command {
@@ -155,7 +155,7 @@ login the note is created anonymously.`,
 	return cmd
 }
 
-type noteAction func(*api.Client, context.Context, osm.NoteID, string) (*osm.Note, error)
+type noteAction func(*api.Client, context.Context, int64, string) (*osm.Note, error)
 
 func newNoteActionCmd(a *app, verb, short string, textRequired bool, action noteAction) *cobra.Command {
 	var text string

@@ -8,46 +8,34 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/paulmach/osm"
-
-	"github.com/happyhackingspace/osmctl/internal/osmref"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 // Fetcher reads the live state of elements from the API.
 type Fetcher interface {
-	Element(ctx context.Context, id osm.FeatureID, full bool) (*osm.OSM, error)
-	ElementVersion(ctx context.Context, id osm.FeatureID, version int) (*osm.OSM, error)
+	Element(ctx context.Context, id osm.ID, full bool) (*osm.Data, error)
+	ElementVersion(ctx context.Context, id osm.ID, version int) (*osm.Data, error)
 }
 
 // Stage is the pending changeset for one server. New elements get negative
 // placeholder ids, which the server replaces on upload.
 type Stage struct {
-	Server string   `json:"server"`
-	NextID int64    `json:"next_id"`
-	Create *osm.OSM `json:"create,omitempty"`
-	Modify *osm.OSM `json:"modify,omitempty"`
-	Delete *osm.OSM `json:"delete,omitempty"`
+	Server string    `json:"server"`
+	NextID int64     `json:"next_id"`
+	Create *osm.Data `json:"create,omitempty"`
+	Modify *osm.Data `json:"modify,omitempty"`
+	Delete *osm.Data `json:"delete,omitempty"`
 	// Base keeps each modified or deleted element as it was when first staged,
 	// so diff can show what changed.
-	Base *osm.OSM `json:"base,omitempty"`
+	Base *osm.Data `json:"base,omitempty"`
 }
 
 func New(server string) *Stage {
 	return &Stage{Server: server, NextID: -1}
 }
 
-func (s *Stage) Empty() bool {
-	return count(s.Create)+count(s.Modify)+count(s.Delete) == 0
-}
-
-func (s *Stage) Len() int { return count(s.Create) + count(s.Modify) + count(s.Delete) }
-
-func count(o *osm.OSM) int {
-	if o == nil {
-		return 0
-	}
-	return len(o.Nodes) + len(o.Ways) + len(o.Relations)
-}
+func (s *Stage) Len() int    { return s.Create.Len() + s.Modify.Len() + s.Delete.Len() }
+func (s *Stage) Empty() bool { return s.Len() == 0 }
 
 // Change is what push uploads.
 func (s *Stage) Change() *osm.Change {
@@ -56,37 +44,58 @@ func (s *Stage) Change() *osm.Change {
 
 var ErrStagedForDeletion = errors.New("is staged for deletion")
 
+// put stores el in the section, replacing any element with the same id.
+func put(d **osm.Data, el osm.Element) {
+	if *d == nil {
+		*d = &osm.Data{}
+	}
+	(*d).Remove(el.ElementID())
+	(*d).Add(el)
+}
+
+// drop removes id from the section; an emptied section becomes nil so it
+// disappears from the saved stage.
+func drop(d **osm.Data, id osm.ID) {
+	if *d == nil {
+		return
+	}
+	(*d).Remove(id)
+	if (*d).Len() == 0 {
+		*d = nil
+	}
+}
+
 // editable returns the element to change in place: the staged copy if there is
 // one, otherwise a copy of the live version that becomes staged for modify.
-func (s *Stage) editable(ctx context.Context, f Fetcher, id osm.FeatureID) (osm.Element, error) {
-	if el := find(s.Create, id); el != nil {
+func (s *Stage) editable(ctx context.Context, f Fetcher, id osm.ID) (osm.Element, error) {
+	if el := s.Create.Find(id); el != nil {
 		return el, nil
 	}
-	if el := find(s.Modify, id); el != nil {
+	if el := s.Modify.Find(id); el != nil {
 		return el, nil
 	}
-	if find(s.Delete, id) != nil {
+	if s.Delete.Find(id) != nil {
 		return nil, fmt.Errorf("%s %w (run `osmctl reset %s` first)", id, ErrStagedForDeletion, id)
 	}
-	if id.Ref() < 0 {
+	if id.Ref < 0 {
 		return nil, fmt.Errorf("%s is not a staged element", id)
 	}
 	live, err := fetchOne(ctx, f, id)
 	if err != nil {
 		return nil, err
 	}
-	s.Base = with(s.Base, clone(live))
-	el := clone(live)
-	s.Modify = with(s.Modify, el)
+	put(&s.Base, live.Clone())
+	el := live.Clone()
+	put(&s.Modify, el)
 	return el, nil
 }
 
-func fetchOne(ctx context.Context, f Fetcher, id osm.FeatureID) (osm.Element, error) {
-	o, err := f.Element(ctx, id, false)
+func fetchOne(ctx context.Context, f Fetcher, id osm.ID) (osm.Element, error) {
+	d, err := f.Element(ctx, id, false)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", id, err)
 	}
-	el := find(o, id)
+	el := d.Find(id)
 	if el == nil {
 		return nil, fmt.Errorf("fetch %s: not in response", id)
 	}
@@ -96,29 +105,26 @@ func fetchOne(ctx context.Context, f Fetcher, id osm.FeatureID) (osm.Element, er
 // settle drops a staged modification that no longer differs from the base,
 // so undoing an edit by hand leaves nothing to push.
 func (s *Stage) settle(el osm.Element) {
-	id := osmref.Of(el)
-	if id.Ref() < 0 {
-		return
-	}
-	if base := find(s.Base, id); base != nil && equal(base, el) {
-		s.Modify = without(s.Modify, id)
-		s.Base = without(s.Base, id)
+	id := el.ElementID()
+	if base := s.Base.Find(id); base != nil && equal(base, el) {
+		drop(&s.Modify, id)
+		drop(&s.Base, id)
 	}
 }
 
-func (s *Stage) Tag(ctx context.Context, f Fetcher, id osm.FeatureID, edit TagEdit) error {
+func (s *Stage) Tag(ctx context.Context, f Fetcher, id osm.ID, edit TagEdit) error {
 	el, err := s.editable(ctx, f, id)
 	if err != nil {
 		return err
 	}
-	setTags(el, edit.Apply(tagsOf(el)))
+	osm.SetTags(el, edit.Apply(osm.TagsOf(el)))
 	s.settle(el)
 	return nil
 }
 
-func (s *Stage) Move(ctx context.Context, f Fetcher, id osm.FeatureID, lat, lon float64) error {
-	if id.Type() != osm.TypeNode {
-		return fmt.Errorf("only nodes have a location; %s is a %s", id, id.Type())
+func (s *Stage) Move(ctx context.Context, f Fetcher, id osm.ID, lat, lon float64) error {
+	if id.Type != osm.TypeNode {
+		return fmt.Errorf("only nodes have a location; %s is a %s", id, id.Type)
 	}
 	el, err := s.editable(ctx, f, id)
 	if err != nil {
@@ -139,97 +145,93 @@ func (s *Stage) placeholder() int64 {
 	return id
 }
 
-func (s *Stage) AddNode(lat, lon float64, tags osm.Tags) osm.FeatureID {
-	n := &osm.Node{ID: osm.NodeID(s.placeholder()), Lat: lat, Lon: lon, Tags: tags, Visible: true}
-	s.Create = with(s.Create, n)
-	return osmref.Of(n)
+func (s *Stage) AddNode(lat, lon float64, tags osm.Tags) osm.ID {
+	n := &osm.Node{ID: s.placeholder(), Lat: lat, Lon: lon, Tags: tags, Meta: osm.Meta{Visible: true}}
+	put(&s.Create, n)
+	return n.ElementID()
 }
 
-func (s *Stage) AddWay(nodes []osm.NodeID, tags osm.Tags) (osm.FeatureID, error) {
+func (s *Stage) AddWay(nodes []int64, tags osm.Tags) (osm.ID, error) {
 	if len(nodes) < 2 {
-		return 0, errors.New("a way needs at least two nodes")
+		return osm.ID{}, errors.New("a way needs at least two nodes")
 	}
 	for _, n := range nodes {
-		if n < 0 && find(s.Create, n.FeatureID()) == nil {
-			return 0, fmt.Errorf("%s is not a staged node", n.FeatureID())
+		if id := (osm.ID{Type: osm.TypeNode, Ref: n}); n < 0 && s.Create.Find(id) == nil {
+			return osm.ID{}, fmt.Errorf("%s is not a staged node", id)
 		}
 	}
-	w := &osm.Way{ID: osm.WayID(s.placeholder()), Tags: tags, Visible: true}
-	for _, n := range nodes {
-		w.Nodes = append(w.Nodes, osm.WayNode{ID: n})
-	}
-	s.Create = with(s.Create, w)
-	return osmref.Of(w), nil
+	w := &osm.Way{ID: s.placeholder(), Nodes: slices.Clone(nodes), Tags: tags, Meta: osm.Meta{Visible: true}}
+	put(&s.Create, w)
+	return w.ElementID(), nil
 }
 
-func (s *Stage) Remove(ctx context.Context, f Fetcher, id osm.FeatureID) error {
-	if id.Ref() < 0 {
-		if find(s.Create, id) == nil {
+func (s *Stage) Remove(ctx context.Context, f Fetcher, id osm.ID) error {
+	if id.Ref < 0 {
+		if s.Create.Find(id) == nil {
 			return fmt.Errorf("%s is not a staged element", id)
 		}
-		if user := s.stagedUserOf(id); user != 0 {
+		if user, ok := s.stagedUserOf(id); ok {
 			return fmt.Errorf("%s is still used by staged %s", id, user)
 		}
-		s.Create = without(s.Create, id)
+		drop(&s.Create, id)
 		return nil
 	}
-	if find(s.Delete, id) != nil {
+	if s.Delete.Find(id) != nil {
 		return nil
 	}
-	base := find(s.Base, id)
+	base := s.Base.Find(id)
 	if base == nil {
 		live, err := fetchOne(ctx, f, id)
 		if err != nil {
 			return err
 		}
-		base = clone(live)
-		s.Base = with(s.Base, base)
+		base = live.Clone()
+		put(&s.Base, base)
 	}
-	s.Modify = without(s.Modify, id)
-	// The API wants the version being deleted, and some servers also check
-	// the full element, so send the base as it was fetched.
-	s.Delete = with(s.Delete, clone(base))
+	drop(&s.Modify, id)
+	// The API wants the version being deleted, so send the base as fetched.
+	put(&s.Delete, base.Clone())
 	return nil
 }
 
 // stagedUserOf finds a staged way or relation that references id.
-func (s *Stage) stagedUserOf(id osm.FeatureID) osm.FeatureID {
-	for _, o := range []*osm.OSM{s.Create, s.Modify} {
-		if o == nil {
+func (s *Stage) stagedUserOf(id osm.ID) (osm.ID, bool) {
+	for _, d := range []*osm.Data{s.Create, s.Modify} {
+		if d == nil {
 			continue
 		}
-		for _, w := range o.Ways {
-			if id.Type() == osm.TypeNode && slices.Contains(w.Nodes.NodeIDs(), id.NodeID()) {
-				return osmref.Of(w)
+		for _, w := range d.Ways {
+			if id.Type == osm.TypeNode && slices.Contains(w.Nodes, id.Ref) {
+				return w.ElementID(), true
 			}
 		}
-		for _, r := range o.Relations {
+		for _, r := range d.Relations {
 			for _, m := range r.Members {
-				if mid, ok := memberFeature(m); ok && mid == id {
-					return osmref.Of(r)
+				if m.ElementID() == id {
+					return r.ElementID(), true
 				}
 			}
 		}
 	}
-	return 0
+	return osm.ID{}, false
 }
 
 // Clear unstages everything.
 func (s *Stage) Clear() { *s = *New(s.Server) }
 
 // Reset unstages one element.
-func (s *Stage) Reset(id osm.FeatureID) error {
-	if find(s.Create, id) == nil && find(s.Modify, id) == nil && find(s.Delete, id) == nil {
+func (s *Stage) Reset(id osm.ID) error {
+	if s.Create.Find(id) == nil && s.Modify.Find(id) == nil && s.Delete.Find(id) == nil {
 		return fmt.Errorf("%s has no staged changes", id)
 	}
-	if id.Ref() < 0 {
-		if user := s.stagedUserOf(id); user != 0 {
+	if id.Ref < 0 {
+		if user, ok := s.stagedUserOf(id); ok {
 			return fmt.Errorf("%s is still used by staged %s; reset that first", id, user)
 		}
 	}
-	s.Create = without(s.Create, id)
-	s.Modify = without(s.Modify, id)
-	s.Delete = without(s.Delete, id)
-	s.Base = without(s.Base, id)
+	drop(&s.Create, id)
+	drop(&s.Modify, id)
+	drop(&s.Delete, id)
+	drop(&s.Base, id)
 	return nil
 }

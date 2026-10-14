@@ -3,7 +3,7 @@ package tagfilter
 import (
 	"testing"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 func TestParse(t *testing.T) {

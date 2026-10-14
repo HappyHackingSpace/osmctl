@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 
 	"github.com/happyhackingspace/osmctl/internal/tagfilter"
 )
@@ -23,12 +23,12 @@ type Around struct {
 }
 
 // AreaIDFor converts an OSM way or relation into the id Overpass uses for the area it encloses.
-func AreaIDFor(id osm.FeatureID) (int64, error) {
-	switch id.Type() {
+func AreaIDFor(id osm.ID) (int64, error) {
+	switch id.Type {
 	case osm.TypeWay:
-		return 2400000000 + id.Ref(), nil
+		return 2400000000 + id.Ref, nil
 	case osm.TypeRelation:
-		return 3600000000 + id.Ref(), nil
+		return 3600000000 + id.Ref, nil
 	}
 	return 0, fmt.Errorf("%s does not enclose an area", id)
 }

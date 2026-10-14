@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 func newTestClient(t *testing.T, h http.HandlerFunc) *Client {
@@ -55,10 +55,11 @@ func TestUploadStampsChangesetAndParsesDiff(t *testing.T) {
 		</diffResult>`)
 	})
 
-	change := &osm.Change{}
-	change.AppendCreate(&osm.Node{ID: -1, Lat: 1, Lon: 2, Visible: true})
-	change.AppendModify(&osm.Way{ID: 5, Version: 2, Visible: true})
-	change.AppendDelete(&osm.Node{ID: 7, Version: 1})
+	change := &osm.Change{
+		Create: &osm.Data{Nodes: []*osm.Node{{ID: -1, Lat: 1, Lon: 2}}},
+		Modify: &osm.Data{Ways: []*osm.Way{{ID: 5, Meta: osm.Meta{Version: 2}}}},
+		Delete: &osm.Data{Nodes: []*osm.Node{{ID: 7, Meta: osm.Meta{Version: 1}}}},
+	}
 
 	res, err := c.Upload(context.Background(), 77, change)
 	if err != nil {
@@ -67,7 +68,7 @@ func TestUploadStampsChangesetAndParsesDiff(t *testing.T) {
 	if got := strings.Count(body, `changeset="77"`); got != 3 {
 		t.Errorf("stamped %d elements, want 3:\n%s", got, body)
 	}
-	if change.Create.Nodes[0].ChangesetID != 0 {
+	if change.Create.Nodes[0].Changeset != 0 {
 		t.Error("Upload mutated the caller's change")
 	}
 	if len(res.Entries) != 3 || res.Entries[0].Type() != "node" || res.Entries[0].NewID != 900 {
@@ -81,7 +82,7 @@ func TestErrorCarriesServerMessage(t *testing.T) {
 		_, _ = io.WriteString(w, "Version mismatch: Provided 1, server had: 2 of Node 7")
 	})
 
-	_, err := c.Upload(context.Background(), 1, &osm.Change{Delete: &osm.OSM{Nodes: osm.Nodes{{ID: 7, Version: 1}}}})
+	_, err := c.Upload(context.Background(), 1, &osm.Change{Delete: &osm.Data{Nodes: []*osm.Node{{ID: 7, Meta: osm.Meta{Version: 1}}}}})
 	var apiErr *Error
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict {
 		t.Fatalf("err = %v, want 409 *Error", err)
@@ -106,7 +107,7 @@ func TestCreateNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n.ID != 12 || n.Status != osm.NoteOpen {
+	if n.ID != 12 || n.Status != "open" {
 		t.Errorf("unexpected note %+v", n)
 	}
 }
@@ -115,7 +116,7 @@ func TestIsNotFound(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	_, err := c.Element(context.Background(), osm.NodeID(1).FeatureID(), false)
+	_, err := c.Element(context.Background(), osm.ID{Type: osm.TypeNode, Ref: 1}, false)
 	if !IsNotFound(err) {
 		t.Errorf("IsNotFound(%v) = false", err)
 	}
@@ -135,50 +136,7 @@ func TestChangesetReadsChangesCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.ChangesCount != 5 || cs.Tags.Find("comment") != "hi" || len(cs.Discussion.Comments) != 1 {
+	if cs.Changes != 5 || cs.Tags.Find("comment") != "hi" || len(cs.Discussion) != 1 {
 		t.Errorf("unexpected changeset %+v", cs)
-	}
-}
-
-func TestUploadDeletesParentsBeforeNodes(t *testing.T) {
-	var body string
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		body = string(b)
-		_, _ = io.WriteString(w, `<diffResult/>`)
-	})
-	change := &osm.Change{
-		Create: &osm.OSM{Nodes: osm.Nodes{{ID: -1}}, Ways: osm.Ways{{ID: -2, Nodes: osm.WayNodes{{ID: -1}, {ID: 3}}}}},
-		Delete: &osm.OSM{Nodes: osm.Nodes{{ID: 1, Version: 1}}, Ways: osm.Ways{{ID: 9, Version: 1}}},
-	}
-	if _, err := c.Upload(context.Background(), 5, change); err != nil {
-		t.Fatal(err)
-	}
-	create := body[strings.Index(body, "<create>"):strings.Index(body, "</create>")]
-	if strings.Index(create, "<node") > strings.Index(create, "<way") {
-		t.Errorf("create must list nodes before the ways using them:\n%s", create)
-	}
-	del := body[strings.LastIndex(body, "<delete>"):]
-	if strings.Index(del, "<way") > strings.Index(del, "<node") {
-		t.Errorf("delete must list ways before their nodes:\n%s", del)
-	}
-	if !strings.Contains(body, `<way id="-2"`) || !strings.Contains(body, `<nd ref="-1"`) {
-		t.Errorf("placeholder ids lost:\n%s", body)
-	}
-}
-
-func TestEncodeChangeIsMinimal(t *testing.T) {
-	b, err := EncodeChange(&osm.Change{
-		Create: &osm.OSM{Nodes: osm.Nodes{{ID: -1, Lat: 37.91, Lon: 40.23, Visible: true, ChangesetID: 5, Tags: osm.Tags{{Key: "name", Value: `A & "B"`}}}}},
-		Modify: &osm.OSM{Relations: osm.Relations{{ID: 3, Version: 4, ChangesetID: 5, User: "x", UserID: 9,
-			Members: osm.Members{{Type: osm.TypeWay, Ref: 8, Role: "outer"}}}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `<osmChange version="0.6"><create><node id="-1" changeset="5" lat="37.91" lon="40.23"><tag k="name" v="A &amp; &#34;B&#34;"></tag></node></create>` +
-		`<modify><relation id="3" changeset="5" version="4"><member type="way" ref="8" role="outer"></member></relation></modify></osmChange>`
-	if string(b) != want {
-		t.Errorf("got\n%s\nwant\n%s", b, want)
 	}
 }

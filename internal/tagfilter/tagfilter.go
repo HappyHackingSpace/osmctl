@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Filter struct {
@@ -57,7 +57,7 @@ func ParseAll(args []string) ([]Filter, error) {
 
 // Match follows Overpass semantics: != and !~ also match when the key is absent.
 func (f Filter) Match(tags osm.Tags) bool {
-	v, ok := tags.Map()[f.Key], tags.HasTag(f.Key)
+	v, ok := tags.Map()[f.Key], tags.Has(f.Key)
 	switch f.Op {
 	case "":
 		return ok

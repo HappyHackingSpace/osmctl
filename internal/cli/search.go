@@ -8,11 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/geo"
 	"github.com/happyhackingspace/osmctl/internal/nominatim"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/overpass"
 	"github.com/happyhackingspace/osmctl/internal/tagfilter"
@@ -185,7 +185,7 @@ func (a *app) findScope(ctx context.Context, near string, radius float64, bbox, 
 			return overpass.Scope{}, err
 		}
 		for _, p := range places {
-			id, ok := p.FeatureID()
+			id, ok := p.ElementID()
 			if !ok {
 				continue
 			}

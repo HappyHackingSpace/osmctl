@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Point struct{ Lat, Lon float64 }

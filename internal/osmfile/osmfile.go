@@ -6,66 +6,48 @@ import (
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
-	"runtime"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/paulmach/osm"
-	"github.com/paulmach/osm/osmpbf"
-	"github.com/paulmach/osm/osmxml"
-
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/tagfilter"
 )
 
-// scanner is an osm.Scanner that also releases the file it reads.
-type scanner struct {
-	osm.Scanner
-	pbf     *osmpbf.Scanner
-	closers []io.Closer
-}
-
-func (s *scanner) Close() error {
-	err := s.Scanner.Close()
-	for _, c := range s.closers {
-		err = errors.Join(err, c.Close())
-	}
-	return err
-}
-
-// open picks the decoder from the file name: .pbf, .osm, .osm.gz or .osm.bz2.
-func open(ctx context.Context, path string) (*scanner, error) {
+// each streams the elements of a .pbf, .osm, .osm.gz or .osm.bz2 file to fn.
+// It returns the PBF header when the file has one.
+func each(ctx context.Context, path string, nodesOnly bool, fn func(osm.Element) error) (*osm.PBFHeader, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	s := &scanner{closers: []io.Closer{f}}
+	defer func() { _ = f.Close() }()
+
 	name := strings.ToLower(path)
+	var r io.Reader = f
 	switch {
 	case strings.HasSuffix(name, ".pbf"):
-		s.pbf = osmpbf.New(ctx, f, runtime.GOMAXPROCS(0))
-		s.Scanner = s.pbf
+		p := osm.NewPBFReader(f)
+		p.NodesOnly = nodesOnly
+		err := p.Each(ctx, fn)
+		return &p.Header, err
 	case strings.HasSuffix(name, ".osm"), strings.HasSuffix(name, ".xml"):
-		s.Scanner = osmxml.New(ctx, f)
 	case strings.HasSuffix(name, ".osm.gz"):
 		gz, err := gzip.NewReader(f)
 		if err != nil {
-			_ = f.Close()
 			return nil, err
 		}
-		s.closers = append(s.closers, gz)
-		s.Scanner = osmxml.New(ctx, gz)
+		defer func() { _ = gz.Close() }()
+		r = gz
 	case strings.HasSuffix(name, ".osm.bz2"):
-		s.Scanner = osmxml.New(ctx, bzip2.NewReader(f))
+		r = bzip2.NewReader(f)
 	default:
-		_ = f.Close()
 		return nil, fmt.Errorf("unsupported file %q (expected .osm.pbf, .osm, .osm.gz or .osm.bz2)", path)
 	}
-	return s, nil
+	return nil, osm.EachXML(ctx, r, nodesOnly, fn)
 }
 
 type Stats struct {
@@ -78,19 +60,7 @@ type Stats struct {
 }
 
 func Info(ctx context.Context, path string) (*Stats, error) {
-	s, err := open(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = s.Close() }()
-
 	st := &Stats{}
-	if s.pbf != nil {
-		if h, err := s.pbf.Header(); err == nil {
-			st.WritingProgram = h.WritingProgram
-			st.ReplicationTimestamp = h.ReplicationTimestamp
-		}
-	}
 	seen := func(t time.Time) {
 		if t.IsZero() {
 			return
@@ -102,25 +72,29 @@ func Info(ctx context.Context, path string) (*Stats, error) {
 			st.LastEdit = t
 		}
 	}
-	for s.Scan() {
-		switch o := s.Object().(type) {
+	header, err := each(ctx, path, false, func(el osm.Element) error {
+		seen(osm.MetaOf(el).Timestamp)
+		switch v := el.(type) {
 		case *osm.Node:
 			st.Nodes++
-			seen(o.Timestamp)
 			if st.Bounds == nil {
-				st.Bounds = &osm.Bounds{MinLat: o.Lat, MaxLat: o.Lat, MinLon: o.Lon, MaxLon: o.Lon}
+				st.Bounds = &osm.Bounds{MinLat: v.Lat, MaxLat: v.Lat, MinLon: v.Lon, MaxLon: v.Lon}
 			}
-			st.Bounds.MinLat, st.Bounds.MaxLat = min(st.Bounds.MinLat, o.Lat), max(st.Bounds.MaxLat, o.Lat)
-			st.Bounds.MinLon, st.Bounds.MaxLon = min(st.Bounds.MinLon, o.Lon), max(st.Bounds.MaxLon, o.Lon)
+			b := st.Bounds
+			b.MinLat, b.MaxLat = min(b.MinLat, v.Lat), max(b.MaxLat, v.Lat)
+			b.MinLon, b.MaxLon = min(b.MinLon, v.Lon), max(b.MaxLon, v.Lon)
 		case *osm.Way:
 			st.Ways++
-			seen(o.Timestamp)
 		case *osm.Relation:
 			st.Relations++
-			seen(o.Timestamp)
 		}
+		return nil
+	})
+	if header != nil {
+		st.WritingProgram = header.WritingProgram
+		st.ReplicationTimestamp = header.ReplicationTimestamp
 	}
-	return st, s.Err()
+	return st, err
 }
 
 type Query struct {
@@ -130,65 +104,49 @@ type Query struct {
 	Types []osm.Type
 }
 
-func (q Query) wants(t osm.Type) bool {
-	if len(q.Types) == 0 {
-		return true
-	}
-	for _, x := range q.Types {
-		if x == t {
-			return true
-		}
-	}
-	return false
+func (q Query) matches(t osm.Type, tags osm.Tags) bool {
+	return (len(q.Types) == 0 || slices.Contains(q.Types, t)) && tagfilter.MatchAll(q.Filters, tags)
 }
 
 // Extract returns the matching elements plus every node their ways need to be
 // drawn, so the result converts cleanly to XML or GeoJSON. It reads the file
 // twice: once to match, once to collect those nodes.
-func Extract(ctx context.Context, path string, q Query) (*osm.OSM, error) {
-	s, err := open(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	out := &osm.OSM{}
-	inBox := map[osm.NodeID]bool{}
-	kept := map[osm.NodeID]bool{}
-	keptWays := map[osm.WayID]bool{}
-	need := map[osm.NodeID]bool{}
+func Extract(ctx context.Context, path string, q Query) (*osm.Data, error) {
+	out := &osm.Data{}
+	inBox := map[int64]bool{}
+	kept := map[int64]bool{}
+	keptWays := map[int64]bool{}
+	need := map[int64]bool{}
 
-	matches := func(t osm.Type, tags osm.Tags) bool {
-		return q.wants(t) && tagfilter.MatchAll(q.Filters, tags)
-	}
-	for s.Scan() {
-		switch o := s.Object().(type) {
+	_, err := each(ctx, path, false, func(el osm.Element) error {
+		switch v := el.(type) {
 		case *osm.Node:
-			round(o)
 			if q.Bounds != nil {
-				if !q.Bounds.ContainsNode(o) {
-					continue
+				if !q.Bounds.Contains(v.Lat, v.Lon) {
+					return nil
 				}
-				inBox[o.ID] = true
+				inBox[v.ID] = true
 			}
-			if matches(osm.TypeNode, o.Tags) {
-				out.Nodes = append(out.Nodes, o)
-				kept[o.ID] = true
+			if q.matches(osm.TypeNode, v.Tags) {
+				out.Nodes = append(out.Nodes, v)
+				kept[v.ID] = true
 			}
 		case *osm.Way:
-			if !matches(osm.TypeWay, o.Tags) || (q.Bounds != nil && !touches(o, inBox)) {
-				continue
+			if !q.matches(osm.TypeWay, v.Tags) || (q.Bounds != nil && !slices.ContainsFunc(v.Nodes, func(id int64) bool { return inBox[id] })) {
+				return nil
 			}
-			out.Ways = append(out.Ways, o)
-			keptWays[o.ID] = true
-			for _, wn := range o.Nodes {
-				need[wn.ID] = true
+			out.Ways = append(out.Ways, v)
+			keptWays[v.ID] = true
+			for _, id := range v.Nodes {
+				need[id] = true
 			}
 		case *osm.Relation:
-			if matches(osm.TypeRelation, o.Tags) && (q.Bounds == nil || hasMember(o, inBox, keptWays)) {
-				out.Relations = append(out.Relations, o)
+			if q.matches(osm.TypeRelation, v.Tags) && (q.Bounds == nil || hasMember(v, inBox, keptWays)) {
+				out.Relations = append(out.Relations, v)
 			}
 		}
-	}
-	err = errors.Join(s.Err(), s.Close())
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -199,65 +157,24 @@ func Extract(ctx context.Context, path string, q Query) (*osm.OSM, error) {
 	if len(need) == 0 {
 		return out, nil
 	}
-	return out, collectNodes(ctx, path, need, len(q.Filters) > 0, out)
-}
-
-// round trims PBF decoding noise (42.508396600000005) back to the 7 decimal
-// places OSM stores.
-func round(n *osm.Node) {
-	n.Lat = math.Round(n.Lat*1e7) / 1e7
-	n.Lon = math.Round(n.Lon*1e7) / 1e7
-}
-
-func touches(w *osm.Way, inBox map[osm.NodeID]bool) bool {
-	for _, wn := range w.Nodes {
-		if inBox[wn.ID] {
-			return true
-		}
-	}
-	return false
-}
-
-func hasMember(r *osm.Relation, inBox map[osm.NodeID]bool, ways map[osm.WayID]bool) bool {
-	for _, m := range r.Members {
-		switch m.Type {
-		case osm.TypeNode:
-			if inBox[osm.NodeID(m.Ref)] {
-				return true
-			}
-		case osm.TypeWay:
-			if ways[osm.WayID(m.Ref)] {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// collectNodes adds the geometry nodes of kept ways. After a tag filter they
-// are stripped of tags so they are not mistaken for matches; a plain area
-// extract keeps them, so the data stays faithful.
-func collectNodes(ctx context.Context, path string, need map[osm.NodeID]bool, strip bool, out *osm.OSM) error {
-	s, err := open(ctx, path)
-	if err != nil {
-		return err
-	}
-	if s.pbf != nil {
-		s.pbf.SkipWays, s.pbf.SkipRelations = true, true
-	}
-	for s.Scan() {
-		n, ok := s.Object().(*osm.Node)
-		if !ok {
-			// XML files list nodes first, so nothing after the first way is needed.
-			break
-		}
-		if need[n.ID] {
-			round(n)
+	// After a tag filter, geometry nodes are stripped of tags so they are not
+	// mistaken for matches; a plain area extract keeps them, so the data stays
+	// faithful.
+	strip := len(q.Filters) > 0
+	_, err = each(ctx, path, true, func(el osm.Element) error {
+		if n, ok := el.(*osm.Node); ok && need[n.ID] {
 			if strip {
 				n.Tags = nil
 			}
 			out.Nodes = append(out.Nodes, n)
 		}
-	}
-	return errors.Join(s.Err(), s.Close())
+		return nil
+	})
+	return out, err
+}
+
+func hasMember(r *osm.Relation, inBox, ways map[int64]bool) bool {
+	return slices.ContainsFunc(r.Members, func(m osm.Member) bool {
+		return (m.Type == osm.TypeNode && inBox[m.Ref]) || (m.Type == osm.TypeWay && ways[m.Ref])
+	})
 }

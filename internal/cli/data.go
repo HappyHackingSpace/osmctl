@@ -8,11 +8,11 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/geo"
 	"github.com/happyhackingspace/osmctl/internal/geofabrik"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/osmfile"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/tagfilter"

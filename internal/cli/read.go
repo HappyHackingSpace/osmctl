@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cli/browser"
-	"github.com/paulmach/osm"
 	"github.com/spf13/cobra"
 
 	"github.com/happyhackingspace/osmctl/internal/api"
+	"github.com/happyhackingspace/osmctl/internal/browser"
 	"github.com/happyhackingspace/osmctl/internal/geo"
-	"github.com/happyhackingspace/osmctl/internal/osmref"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 )
 
@@ -33,13 +32,13 @@ openstreetmap.org URL.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := a.client()
-			all := &osm.OSM{}
+			all := &osm.Data{}
 			for _, arg := range args {
-				id, err := osmref.Parse(arg)
+				id, err := osm.ParseID(arg)
 				if err != nil {
 					return err
 				}
-				var o *osm.OSM
+				var o *osm.Data
 				if version > 0 {
 					o, err = c.ElementVersion(cmd.Context(), id, version)
 				} else {
@@ -49,7 +48,7 @@ openstreetmap.org URL.`,
 				if err != nil {
 					return notFoundHint(err, id.String())
 				}
-				merge(all, o)
+				all.Merge(o)
 			}
 			return output.Data(a.out, all, a.format)
 		},
@@ -66,7 +65,7 @@ func newHistoryCmd(a *app) *cobra.Command {
 		Example: "  osmctl history node/2187164523\n  osmctl history w42 -o json | jq '.elements[].user'",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := osmref.Parse(args[0])
+			id, err := osm.ParseID(args[0])
 			if err != nil {
 				return err
 			}
@@ -121,7 +120,7 @@ The OSM API looks users up by id only. ` + "`osmctl auth status`" + ` shows your
 			if err != nil {
 				return fmt.Errorf("user id must be numeric: %q", args[0])
 			}
-			u, err := a.client().User(cmd.Context(), osm.UserID(id))
+			u, err := a.client().User(cmd.Context(), id)
 			if err != nil {
 				return notFoundHint(err, fmt.Sprintf("user/%d", id))
 			}
@@ -147,7 +146,7 @@ func newBrowseCmd(a *app) *cobra.Command {
 				_, err = fmt.Fprintln(a.out, u)
 				return err
 			}
-			return browser.OpenURL(u)
+			return browser.Open(u)
 		},
 	}
 	cmd.Flags().BoolVarP(&printOnly, "print", "p", false, "print the URL instead of opening it")
@@ -165,17 +164,11 @@ func webPath(ref string) (string, error) {
 	if kind != "" {
 		return fmt.Sprintf("%s/%d", kind, n), nil
 	}
-	id, err := osmref.Parse(ref)
+	id, err := osm.ParseID(ref)
 	if err != nil {
 		return "", err
 	}
 	return id.String(), nil
-}
-
-func merge(dst, src *osm.OSM) {
-	dst.Nodes = append(dst.Nodes, src.Nodes...)
-	dst.Ways = append(dst.Ways, src.Ways...)
-	dst.Relations = append(dst.Relations, src.Relations...)
 }
 
 func notFoundHint(err error, what string) error {

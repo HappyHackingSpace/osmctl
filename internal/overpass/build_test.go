@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paulmach/osm"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 
 	"github.com/happyhackingspace/osmctl/internal/tagfilter"
 )
@@ -36,7 +36,7 @@ out skel qt;`
 
 func TestBuildArea(t *testing.T) {
 	f, _ := tagfilter.Parse("shop")
-	id, err := AreaIDFor(osm.RelationID(223474).FeatureID())
+	id, err := AreaIDFor(osm.ID{Type: osm.TypeRelation, Ref: 223474})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestBuildArea(t *testing.T) {
 	if !strings.Contains(got, "area(id:3600223474)->.a;") || !strings.Contains(got, `nwr["shop"](area.a);`) {
 		t.Errorf("unexpected query:\n%s", got)
 	}
-	if _, err := AreaIDFor(osm.NodeID(1).FeatureID()); err == nil {
+	if _, err := AreaIDFor(osm.ID{Type: osm.TypeNode, Ref: 1}); err == nil {
 		t.Error("a node should not convert to an area")
 	}
 }

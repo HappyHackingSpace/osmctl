@@ -6,9 +6,7 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/paulmach/osm"
-
-	"github.com/happyhackingspace/osmctl/internal/osmref"
+	"github.com/happyhackingspace/osmctl/internal/osm"
 )
 
 type Action string
@@ -21,10 +19,10 @@ const (
 
 // Entry describes how one element changes.
 type Entry struct {
-	Action  Action        `json:"action"`
-	ID      osm.FeatureID `json:"-"`
-	Element string        `json:"element"`
-	Tags    []TagChange   `json:"tags,omitempty"`
+	Action  Action      `json:"action"`
+	ID      osm.ID      `json:"-"`
+	Element string      `json:"element"`
+	Tags    []TagChange `json:"tags,omitempty"`
 	// Other lists non-tag changes in words, such as a move or new way nodes.
 	Other []string `json:"other,omitempty"`
 }
@@ -39,59 +37,41 @@ type TagChange struct {
 // known (it came from an applied .osc), it is fetched from the API.
 func (s *Stage) Diff(ctx context.Context, f Fetcher) ([]Entry, error) {
 	var out []Entry
-	each(s.Create, func(el osm.Element) {
-		e := Entry{Action: Create, ID: osmref.Of(el), Element: osmref.Of(el).String(), Tags: tagChanges(nil, tagsOf(el))}
-		e.Other = describe(nil, el)
-		out = append(out, e)
-	})
-	var err error
-	each(s.Modify, func(el osm.Element) {
-		if err != nil {
-			return
-		}
-		var base osm.Element
-		base, err = s.base(ctx, f, el)
-		if err != nil {
-			return
-		}
-		out = append(out, Entry{
-			Action: Modify, ID: osmref.Of(el), Element: osmref.Of(el).String(),
-			Tags: tagChanges(tagsOf(base), tagsOf(el)), Other: describe(base, el),
-		})
-	})
-	if err != nil {
-		return nil, err
+	for _, el := range s.Create.Elements() {
+		id := el.ElementID()
+		out = append(out, Entry{Action: Create, ID: id, Element: id.String(), Tags: tagChanges(nil, osm.TagsOf(el)), Other: describe(nil, el)})
 	}
-	each(s.Delete, func(el osm.Element) {
-		out = append(out, Entry{Action: Delete, ID: osmref.Of(el), Element: osmref.Of(el).String(), Tags: tagChanges(tagsOf(el), nil)})
-	})
+	for _, el := range s.Modify.Elements() {
+		base, err := s.base(ctx, f, el)
+		if err != nil {
+			return nil, err
+		}
+		id := el.ElementID()
+		out = append(out, Entry{Action: Modify, ID: id, Element: id.String(), Tags: tagChanges(osm.TagsOf(base), osm.TagsOf(el)), Other: describe(base, el)})
+	}
+	for _, el := range s.Delete.Elements() {
+		id := el.ElementID()
+		out = append(out, Entry{Action: Delete, ID: id, Element: id.String(), Tags: tagChanges(osm.TagsOf(el), nil)})
+	}
 	return out, nil
 }
 
 func (s *Stage) base(ctx context.Context, f Fetcher, el osm.Element) (osm.Element, error) {
-	id := osmref.Of(el)
-	if b := find(s.Base, id); b != nil {
+	id := el.ElementID()
+	if b := s.Base.Find(id); b != nil {
 		return b, nil
 	}
-	o, err := f.ElementVersion(ctx, id, version(el))
+	v := osm.MetaOf(el).Version
+	d, err := f.ElementVersion(ctx, id, v)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s v%d to compare: %w", id, version(el), err)
+		return nil, fmt.Errorf("fetch %s v%d to compare: %w", id, v, err)
 	}
-	b := find(o, id)
+	b := d.Find(id)
 	if b == nil {
-		return nil, fmt.Errorf("fetch %s v%d: not in response", id, version(el))
+		return nil, fmt.Errorf("fetch %s v%d: not in response", id, v)
 	}
-	s.Base = with(s.Base, clone(b))
+	put(&s.Base, b.Clone())
 	return b, nil
-}
-
-func each(o *osm.OSM, fn func(osm.Element)) {
-	if o == nil {
-		return
-	}
-	for _, el := range o.Elements() {
-		fn(el)
-	}
 }
 
 func tagChanges(old, new osm.Tags) []TagChange {
@@ -124,16 +104,15 @@ func describe(base, el osm.Element) []string {
 			return []string{fmt.Sprintf("moved %.7f, %.7f -> %.7f, %.7f", b.Lat, b.Lon, v.Lat, v.Lon)}
 		}
 	case *osm.Way:
-		ids := v.Nodes.NodeIDs()
 		if b, ok := base.(*osm.Way); !ok {
-			return []string{fmt.Sprintf("nodes %v", ids)}
-		} else if old := b.Nodes.NodeIDs(); !slices.Equal(old, ids) {
-			return []string{fmt.Sprintf("nodes %v -> %v", old, ids)}
+			return []string{fmt.Sprintf("nodes %v", v.Nodes)}
+		} else if !slices.Equal(b.Nodes, v.Nodes) {
+			return []string{fmt.Sprintf("nodes %v -> %v", b.Nodes, v.Nodes)}
 		}
 	case *osm.Relation:
 		if b, ok := base.(*osm.Relation); !ok {
 			return []string{fmt.Sprintf("%d members", len(v.Members))}
-		} else if !equal(&osm.Relation{Members: b.Members}, &osm.Relation{Members: v.Members}) {
+		} else if !slices.Equal(b.Members, v.Members) {
 			return []string{fmt.Sprintf("members changed (%d -> %d)", len(b.Members), len(v.Members))}
 		}
 	}
@@ -145,12 +124,12 @@ func (s *Stage) List() []Entry {
 	var out []Entry
 	for _, sec := range []struct {
 		a Action
-		o *osm.OSM
+		d *osm.Data
 	}{{Create, s.Create}, {Modify, s.Modify}, {Delete, s.Delete}} {
-		each(sec.o, func(el osm.Element) {
-			id := osmref.Of(el)
+		for _, el := range sec.d.Elements() {
+			id := el.ElementID()
 			out = append(out, Entry{Action: sec.a, ID: id, Element: id.String()})
-		})
+		}
 	}
 	return out
 }
