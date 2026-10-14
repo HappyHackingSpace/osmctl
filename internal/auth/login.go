@@ -75,7 +75,7 @@ func Login(ctx context.Context, srv server.Server, opts LoginOptions) (string, e
 		defer stop()
 	}
 	if opts.In != nil {
-		go readPaste(opts.In, opts.Out, state, results)
+		go readPaste(opts.In, opts.Out, state, results, listenErr)
 	}
 
 	if listenErr != nil && opts.In == nil {
@@ -140,9 +140,10 @@ func listen(ctx context.Context, state string, results chan<- result) (func(), e
 }
 
 // readPaste accepts redirect addresses typed into the terminal. Anything that
-// is not one gets a hint and another try; end of input just stops listening
-// here, since the browser redirect may still arrive.
-func readPaste(in io.Reader, out io.Writer, state string, results chan<- result) {
+// is not one gets a hint and another try. At end of input it stops quietly
+// while the browser redirect can still arrive, and fails the login when the
+// listener could not start, since then nothing else can complete it.
+func readPaste(in io.Reader, out io.Writer, state string, results chan<- result, listenErr error) {
 	sc := bufio.NewScanner(in)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -160,6 +161,12 @@ func readPaste(in io.Reader, out io.Writer, state string, results chan<- result)
 		default:
 		}
 		return
+	}
+	if listenErr != nil {
+		select {
+		case results <- result{err: fmt.Errorf("listen on %s for the login redirect: %w; and no redirect address was pasted", LoopbackAddr, listenErr)}:
+		default:
+		}
 	}
 }
 

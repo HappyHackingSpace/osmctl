@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -152,6 +153,24 @@ func TestLoginKeepsWaitingAfterBadPaste(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "not the redirect address") {
 		t.Errorf("no hint after a bad paste:\n%s", out.String())
+	}
+}
+
+func TestLoginFailsFastWhenPortBusyAndNothingPasted(t *testing.T) {
+	busy, err := net.Listen("tcp", LoopbackAddr)
+	if err != nil {
+		t.Skipf("cannot occupy %s: %v", LoopbackAddr, err)
+	}
+	defer func() { _ = busy.Close() }()
+
+	srv := server.Server{Name: "test", Web: "https://osm.invalid", ClientID: "test-client"}
+	start := time.Now()
+	_, err = Login(context.Background(), srv, LoginOptions{NoBrowser: true, In: strings.NewReader(""), Out: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "no redirect address was pasted") {
+		t.Errorf("err = %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Error("login waited for the timeout instead of failing fast")
 	}
 }
 
