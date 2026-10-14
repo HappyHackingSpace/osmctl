@@ -317,7 +317,7 @@ func TestPushSplitsAndResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	push := append(srv, "push", "-m", "Add a footpath along the stream", "--no-check", "--yes")
+	push := []string{"--server", f.URL, "push", "-m", "Add a footpath along the stream", "--no-check", "--yes"}
 	_, errOut, err := run(t, store, "", push...)
 	if err == nil || !strings.Contains(err.Error(), "part 2 of 2 failed") {
 		t.Fatalf("expected the second part to fail: %v\n%s", err, errOut)
