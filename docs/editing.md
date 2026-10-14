@@ -89,6 +89,21 @@ osmctl diff      # exactly what changes
 
 `osmctl diff -o xml` prints the osmChange that `push` will upload.
 
+## Checking for mistakes
+
+```sh
+osmctl check
+```
+
+`check` runs the kind of checks iD and JOSM run before saving. `push` runs them too.
+
+| Kind | Examples | Effect |
+|---|---|---|
+| error | an untagged new node that belongs to nothing, a way using a node staged for deletion, the same node twice in a row | `push` refuses to upload |
+| warning | a road not connected to any other road, a road crossing another road, railway or waterway without a shared node, deprecated tags such as `highway=ford`, `highway=road`, a vague changeset comment | shown before you confirm |
+
+The connection and crossing checks download the map around your edits. Roads marked `bridge`, `tunnel` or a different `layer` are not reported as crossings. Use `--offline` to skip the download, or `push --no-check` to skip the checks entirely.
+
 Undo with `reset`:
 
 ```sh

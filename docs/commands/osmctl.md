@@ -28,6 +28,7 @@ Practice on the sandbox first: `osmctl --server dev ...`
 * [osmctl auth](osmctl_auth.md)	 - Log in to OpenStreetMap and manage your token
 * [osmctl browse](osmctl_browse.md)	 - Open an element, changeset or note on the website
 * [osmctl changeset](osmctl_changeset.md)	 - Inspect, list, download and discuss changesets
+* [osmctl check](osmctl_check.md)	 - Look for mistakes in staged changes
 * [osmctl data](osmctl_data.md)	 - Work with local .osm and .osm.pbf files
 * [osmctl delete](osmctl_delete.md)	 - Delete elements
 * [osmctl diff](osmctl_diff.md)	 - Show staged changes in detail

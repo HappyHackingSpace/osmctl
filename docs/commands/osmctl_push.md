@@ -6,7 +6,8 @@ Upload staged changes as one changeset
 
 Upload every staged change as a single changeset.
 
-The diff is shown and you are asked to confirm first. The upload is atomic:
+The diff and the results of `osmctl check` are shown and you are asked to
+confirm first; errors stop the push. The upload is atomic:
 if any element changed on the server since you staged it, nothing is
 written and your stage is kept so you can resolve the conflict.
 
@@ -30,6 +31,7 @@ osmctl push -m <comment> [flags]
       --hashtags string   hashtags for the changeset, e.g. #hhs;#mapathon
   -h, --help              help for push
   -m, --message string    changeset comment: what changed and why (required)
+      --no-check          skip the checks for mistakes (see osmctl check)
       --source string     where the information came from, e.g. survey, local knowledge, Bing
       --tag strings       extra changeset tag as key=value (repeatable)
   -y, --yes               do not ask for confirmation

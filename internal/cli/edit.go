@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/happyhackingspace/osmctl/internal/osm"
 	"github.com/happyhackingspace/osmctl/internal/output"
 	"github.com/happyhackingspace/osmctl/internal/stage"
+	"github.com/happyhackingspace/osmctl/internal/validate"
 )
 
 // edit loads the stage for the current server, applies fn and saves it.
@@ -287,6 +289,59 @@ changed (~), nodes moved, elements created and deleted.
 			return output.Diff(a.out, entries, a.format)
 		},
 	}
+}
+
+func newCheckCmd(a *app) *cobra.Command {
+	var comment string
+	var offline bool
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Look for mistakes in staged changes",
+		Long: `Check staged changes the way iD and JOSM do before saving.
+
+Errors would break the data and stop ` + "`osmctl push`" + `: untagged nodes that belong
+to nothing, references to deleted elements, malformed ways.
+
+Warnings deserve a look: roads not connected to the road network, roads
+crossing other roads, railways or waterways without a junction, deprecated
+or vague tags, and (with -m) a vague changeset comment.
+
+The connection and crossing checks download the map around the edits;
+--offline skips them.`,
+		Example: "  osmctl check\n  osmctl check -m \"Add footpath to the shrine\"",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := stage.Load(a.srv.Web)
+			if err != nil {
+				return err
+			}
+			if s.Empty() {
+				return errors.New("nothing staged")
+			}
+			issues := a.validate(cmd.Context(), s, offline)
+			if cmd.Flags().Changed("message") {
+				issues = append(issues, validate.Comment(comment)...)
+			}
+			if err := output.Issues(a.out, issues, a.format); err != nil {
+				return err
+			}
+			if validate.HasErrors(issues) {
+				return errors.New("staged changes have errors")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&comment, "message", "m", "", "also check this changeset comment")
+	cmd.Flags().BoolVar(&offline, "offline", false, "skip the checks that download surrounding map data")
+	return cmd
+}
+
+func (a *app) validate(ctx context.Context, s *stage.Stage, offline bool) []validate.Issue {
+	var src validate.MapSource
+	if !offline {
+		src = a.client()
+	}
+	return validate.Check(ctx, s, src)
 }
 
 func newResetCmd(a *app) *cobra.Command {
