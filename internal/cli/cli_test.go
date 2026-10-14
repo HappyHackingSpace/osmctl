@@ -190,6 +190,7 @@ func TestApplyStagesOsmChange(t *testing.T) {
 
 func TestPushStopsOnCheckErrors(t *testing.T) {
 	t.Setenv(stage.DirEnv, t.TempDir())
+	t.Setenv(auth.TokenEnv, "")
 	f := newFakeOSM(t)
 	store := memStore{f.URL: "test-token"}
 	srv := []string{"--server", f.URL}
