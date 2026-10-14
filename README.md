@@ -28,7 +28,7 @@ With Go 1.27 or newer:
 go install github.com/happyhackingspace/osmctl/cmd/osmctl@latest
 ```
 
-Or download a binary for Linux, macOS or Windows from the [releases page](https://github.com/happyhackingspace/osmctl/releases).
+Or download a binary for Linux, macOS or Windows from the [releases page](https://github.com/happyhackingspace/osmctl/releases). Archives also include man pages (`docs/man`) and shell completions for bash, zsh and fish (`completions/`); `osmctl completion --help` shows how to install them.
 
 ## A quick tour
 
@@ -103,7 +103,7 @@ OpenStreetMap is edited by people, for people. osmctl makes editing fast, so:
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

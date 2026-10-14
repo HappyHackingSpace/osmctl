@@ -1,5 +1,10 @@
 version: 2
 
+before:
+  hooks:
+    - go run ./tools/gendocs -man
+    - sh -c 'mkdir -p completions && for sh in bash zsh fish; do go run ./cmd/osmctl completion $sh > completions/osmctl.$sh; done'
+
 builds:
   - dir: ./cmd/osmctl
     env:
@@ -17,6 +22,11 @@ builds:
 archives:
   - formats:
       - tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - docs/man/*
+      - completions/*
     format_overrides:
       - goos: windows
         formats:

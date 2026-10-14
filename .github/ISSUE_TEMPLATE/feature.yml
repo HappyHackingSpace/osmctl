@@ -1,0 +1,16 @@
+name: Feature request
+description: Something osmctl should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+      description: The task you are trying to get done, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could osmctl help?
+      description: A command or flag you have in mind, if any.
