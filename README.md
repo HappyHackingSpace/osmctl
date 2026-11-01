@@ -105,6 +105,10 @@ OpenStreetMap is edited by people, for people. osmctl makes editing fast, so:
 
 Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=HappyHackingSpace/osmctl&type=Date)](https://star-history.com/#HappyHackingSpace/osmctl&Date)
+
 ## License
 
 osmctl is [MIT licensed](LICENSE). Map data is © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the [Open Database License](https://opendatacommons.org/licenses/odbl/).
